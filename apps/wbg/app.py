@@ -507,6 +507,14 @@ def _from_link():
 
 
 @reactive.effect
+async def _address():
+    # The address bar names the family being looked at, so the page's link
+    # can be copied and sent: .../wbg/?family=cloud_data. Home has none.
+    f = chosen()
+    await session.send_custom_message("wbg_address", f"?family={f}" if f and input.view() != HOME else "")
+
+
+@reactive.effect
 def _one_place_at_a_time():
     # Overview and Explore show one family: with none chosen, back to the
     # Home page. A store with a single family has nothing to choose, so its
@@ -534,6 +542,8 @@ def crumb():
 
 
 with ui.nav_panel(HOME):
+    ui.tags.script("Shiny.addCustomMessageHandler('wbg_address', function(q) {"
+                   " history.replaceState(null, '', q || window.location.pathname); });")
     ui.h2("What do you want to look at?", class_="h3 mt-4 mb-1")
     ui.p("World Bank project documents are read for what each project commits to for its digital assets. The "
          "commitments are kept in separate groups: choose one. Each group has its own measures, counts and "
