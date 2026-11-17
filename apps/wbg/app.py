@@ -1,9 +1,11 @@
-# wbg — climate resilience commitments in World Bank appraisal documents for
-# the digital assets a project finances (repository devvartpoddar/wbg-digital-
-# resilience). Every query and every number computed beyond the views is in
-# wbg_portfolio.app; this file only lays them out. Read only: no write, no
-# model call. Two views: the overall picture, and one country, project, asset
-# or measure at a time. Every chart counts commitments or projects, as the
+# wbg — what World Bank appraisal documents commit to for the digital assets a
+# project finances (repository devvartpoddar/wbg-digital-resilience). Every
+# query and every number computed beyond the views is in wbg_portfolio.app;
+# this file only lays them out. Read only: no write, no model call. The
+# measures come in families (climate resilience; cloud, datacenters and
+# data): the app opens on a page that asks which one to look at, and every
+# view then shows that family only. Two views inside a family: the overall
+# picture, and one country, project, asset or measure at a time. Every chart counts commitments or projects, as the
 # "Count" switch says; any bar, cell, country or card opens the projects and
 # sentences behind it in the side panel. A comment, not a docstring: Express
 # renders a module docstring onto the page.
@@ -18,7 +20,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from shiny import reactive, render, req
 from shiny import ui as cui
-from shiny.express import input, ui
+from shiny.express import input, session, ui
 from shinywidgets import render_plotly
 
 import kit
@@ -29,6 +31,22 @@ import wbg_about  # noqa: E402  (the About view's HTML, beside this file)
 
 kit.page("WBG Digital Resilience", navbar="view")
 
+# The families of measures (the `family` column of a measure's file in the
+# pipeline), in the order the Home page lists them: the name shown, what the
+# card says it covers, and how the Overview opens. A family the pipeline adds
+# before it is named here is shown under its id.
+FAMILIES = {
+    "climate": ("Climate resilience",
+                "What projects commit to so that digital infrastructure withstands climate and disaster risk and "
+                "uses less energy: backup power, early warning, disaster recovery, climate-informed siting, "
+                "renewable energy and more.",
+                "Climate resilience commitments"),
+    "cloud_data": ("Cloud, datacenters and data",
+                   "What projects commit to on hosting and data: datacenters, cloud strategy, migration and "
+                   "procurement, government cloud, and how data is classified, governed, hosted and shared.",
+                   "Cloud, datacenter and data commitments"),
+}
+HOME = "Home"
 PLACE = "Country or region"
 LENSES = {"country": PLACE, "project": "Project", "asset": "Digital asset", "measure": "Measure"}
 LENS_COLUMN = {"country": "place", "project": "project_id", "asset": "asset_name", "measure": "measure_name"}
@@ -125,10 +143,44 @@ def share_text(n, of):
 
 # ---------------------------------------------------------------- data
 
+family = reactive.value(None)        # the family being looked at; None on the Home page
+
+
+def family_name(f):
+    return FAMILIES[f][0] if f in FAMILIES else str(f).replace("_", " ").capitalize()
+
+
+@reactive.calc
+def everything():
+    """The commitments of every family (the cohort's). A store published
+    before families existed has no family: everything is then one group."""
+    cohort = input.cohort() or None
+    df = kit.cached(("wbg", "commitments", cohort), lambda: W.commitments(kit.query_df, cohort))
+    return df if "family" in df else df.assign(family=None)
+
+
+@reactive.calc
+def all_measures():
+    m = kit.cached(("wbg", "measures"), lambda: W.measures(kit.query_df))
+    return m if "family" in m else m.assign(family=None)
+
+
+@reactive.calc
+def families():
+    """The families the store holds, those named in FAMILIES first."""
+    found = [f for f in all_measures()["family"].dropna().unique() if f]
+    return [f for f in FAMILIES if f in found] + sorted(f for f in found if f not in FAMILIES)
+
+
+def chosen():
+    """The family every view shows, or None when the store has one or none."""
+    return family.get() if len(families()) > 1 else None
+
+
 @reactive.calc
 def frame():
-    cohort = input.cohort() or None
-    return kit.cached(("wbg", "commitments", cohort), lambda: W.commitments(kit.query_df, cohort))
+    df, f = everything(), chosen()
+    return df[df["family"] == f] if f else df
 
 
 @reactive.calc
@@ -141,13 +193,16 @@ def base():
 
 @reactive.calc
 def coming():
-    cohort = input.cohort() or None
-    return kit.cached(("wbg", "coming", cohort), lambda: W.coming_up(kit.query_df, cohort))
+    cohort, f = input.cohort() or None, chosen()
+    if not f:
+        return kit.cached(("wbg", "coming", cohort), lambda: W.coming_up(kit.query_df, cohort))
+    return kit.cached(("wbg", "coming", cohort, f), lambda: W.coming_up(kit.query_df, cohort, f))
 
 
 @reactive.calc
 def measure_table():
-    return kit.cached(("wbg", "measures"), lambda: W.measures(kit.query_df))
+    m, f = all_measures(), chosen()
+    return m[m["family"] == f] if f else m
 
 
 @reactive.calc
@@ -414,13 +469,113 @@ with ui.sidebar(id="panel", position="right", open="closed", width=520, title="W
         return cui.div(*head, *body)
 
 
+# ======================================================= home
+def enter(f, lens=None, value=None):
+    """Look at family f: its Overview, or one country or project of it."""
+    family.set(f)
+    drill.set(None)
+    ui.update_sidebar("panel", show=False)
+    if lens:
+        go_to(lens, value)
+    else:
+        ui.update_navs("view", selected="Overview")
+
+
+@reactive.effect
+@reactive.event(input.family_pick)
+def _family_picked():
+    c = input.family_pick()
+    if c.get("family") in families():
+        enter(c["family"], c.get("lens"), c.get("value"))
+
+
+@reactive.effect
+@reactive.event(input.go_home)
+def _go_home():
+    ui.update_navs("view", selected=HOME)
+
+
+@reactive.effect
+def _from_link():
+    # .../wbg/?family=cloud_data opens that family: a link to hand to someone.
+    from urllib.parse import parse_qs
+    want = parse_qs(session.clientdata.url_search().lstrip("?")).get("family", [None])[0]
+    fams = families()
+    with reactive.isolate():
+        if want in fams and len(fams) > 1 and family.get() is None:
+            enter(want)
+
+
+@reactive.effect
+def _one_place_at_a_time():
+    # Overview and Explore show one family: with none chosen, back to the
+    # Home page. A store with a single family has nothing to choose, so its
+    # Home page is skipped and hidden.
+    view, many = input.view(), len(families()) > 1
+    if not many:
+        ui.update_nav_panel("view", target=HOME, method="hide")
+        if view == HOME:
+            ui.update_navs("view", selected="Overview")
+    elif view in ("Overview", "Explore") and family.get() is None:
+        ui.update_navs("view", selected=HOME)
+
+
+def crumb():
+    """Where the reader is: Home, then the family the view shows. Home is the
+    way back to the choice. Nothing when the store has one family."""
+    f = chosen()
+    if not f:
+        return None
+    return cui.div(
+        cui.tags.a("Home", href="#", title="Choose another group",
+                   onclick="Shiny.setInputValue('go_home', Date.now(), {priority: 'event'}); return false;"),
+        cui.span(" › ", style="color:#6b7280"), cui.tags.strong(family_name(f)),
+        class_="mt-3", style="font-size: 15px")
+
+
+with ui.nav_panel(HOME):
+    ui.h2("What do you want to look at?", class_="h3 mt-4 mb-1")
+    ui.p("World Bank project documents are read for what each project commits to for its digital assets. The "
+         "commitments are kept in separate groups: choose one. Each group has its own measures, counts and "
+         "procurement; the projects and documents read are the same.",
+         class_="mb-3", style="max-width: 90ch; color:#4b5563")
+
+    @render.ui
+    def home():
+        df, m, b = everything(), all_measures(), base()
+        items = []
+        for f in families():
+            mine = df[df["family"] == f]
+            n, of = mine["project_id"].nunique(), len(b)
+            counts = ([plural(int((m["family"] == f).sum()), "measure"), plural(len(mine), "commitment"),
+                       f"{share_text(n, of)} {cohort_noun()} read"] if len(mine)
+                      else [plural(int((m["family"] == f).sum()), "measure"), "not run yet: no commitments to show"])
+            js = ("Shiny.setInputValue('family_pick', " + json.dumps({"family": f}) + ", {priority: 'event'})")
+            items.append(cui.tags.button(
+                {"type": "button", "class": "kit-card", "onclick": js, "style": "padding: 20px 22px; gap: 8px"},
+                cui.span(family_name(f), class_="t", style="font-size: 1.35rem"),
+                cui.span(FAMILIES[f][1] if f in FAMILIES else "", class_="s", style="font-size: 15px"),
+                cui.span(" · ".join(counts), style="font-size: 14px; font-weight: 600")))
+        return cui.div(*items, style="display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); "
+                                     "gap: 16px; max-width: 1100px")
+
+
 # ======================================================= overview
 with ui.nav_panel("Overview"):
-    ui.p("Climate resilience commitments in World Bank project documents, with the digital assets they name and "
-         "the procurement linked to them. A commitment is one project, measure, type and digital asset: what a "
-         "document says the project will or may do, not delivery. Click any bar, cell, country or card for the "
-         "projects and sentences behind it. The About tab sets out the method and its limits.",
-         class_="mt-3 mb-0", style="max-width: 110ch")
+
+    @render.ui
+    def ov_crumb():
+        return crumb()
+
+    @render.ui
+    def ov_intro():
+        f = chosen()
+        what = FAMILIES[f][2] if f in FAMILIES else "Commitments" if f is None else f"{family_name(f)} commitments"
+        return cui.p(f"{what} in World Bank project documents, with the digital assets they name and "
+                     "the procurement linked to them. A commitment is one project, measure, type and digital asset: "
+                     "what a document says the project will or may do, not delivery. Click any bar, cell, country "
+                     "or card for the projects and sentences behind it. The About tab sets out the method and its "
+                     "limits.", class_="mt-2 mb-0", style="max-width: 110ch")
 
     @render.ui
     def tiles():
@@ -569,6 +724,11 @@ with ui.nav_panel("Overview"):
 
 # ======================================================= explore
 with ui.nav_panel("Explore"):
+
+    @render.ui
+    def ex_crumb():
+        return crumb()
+
     with ui.div(class_="d-flex flex-wrap gap-3 align-items-end my-3"):
         ui.input_radio_buttons("lens", "View by", LENSES, selected="country", inline=True)
         ui.input_selectize("pick", None, choices=[], width="460px")
@@ -605,7 +765,8 @@ with ui.nav_panel("Explore"):
             df = lens_frame()
             if df.empty:
                 return None
-            return facts(input.pick(), PLACE, df, of=lens_base(), of_what=f"{cohort_noun()} read here")
+            return cui.TagList(facts(input.pick(), PLACE, df, of=lens_base(), of_what=f"{cohort_noun()} read here"),
+                               also_here("country", input.pick(), input.pick()))
 
         with ui.card():
             ui.card_header("Its projects")
@@ -667,11 +828,12 @@ with ui.nav_panel("Explore"):
                     money(h["commitment_usd_m"] * 1e6) if pd.notna(h["commitment_usd_m"]) else None,
                     f"closes {h['closing_date']:%d %b %Y}" if pd.notna(h["closing_date"]) else None,
                     plural(int(h["documents_read"]), "document") + " read"]
-            return cui.card(cui.card_body(
+            return cui.TagList(cui.card(cui.card_body(
                 cui.h3(h["project_name"], class_="h4 mb-1"),
                 cui.p(" · ".join(str(b) for b in bits if b), class_="mb-1", style="color:#4b5563"),
                 cui.p(f"{plural(len(df), 'commitment')} under {plural(df['label_set'].nunique(), 'measure')} · "
-                      f"{plural(len(parts['packages']), 'linked package')}", class_="mb-0 fw-semibold")))
+                      f"{plural(len(parts['packages']), 'linked package')}", class_="mb-0 fw-semibold"))),
+                also_here("project", input.pick(), "This project"))
 
         with ui.layout_columns(col_widths=[6, 6]):
             with ui.card():
@@ -921,6 +1083,7 @@ ui.nav_spacer()
 
 with ui.nav_control():
     with ui.div(class_="d-flex gap-2 align-items-center"):
+
         ui.input_select("unit", None, UNITS, selected="commitments", width="200px")
         ui.input_select("cohort", None, COHORTS, selected="", width="210px")
         ui.input_selectize("find", None, choices=[], width="350px",
@@ -928,6 +1091,30 @@ with ui.nav_control():
 
 
 # ---------------------------------------------------------------- the pieces the views share
+
+def also_here(lens, value, name):
+    """What the other families hold for this country or project: a line each,
+    which opens it there. None when they hold nothing."""
+    f = chosen()
+    if not f:
+        return None
+    df = everything()
+    other = df[(df[LENS_COLUMN[lens]] == value) & (df["family"] != f) & df["family"].notna()]
+    if other.empty:
+        return None
+    out = []
+    for g in [x for x in families() if x != f]:
+        rows = other[other["family"] == g]
+        if rows.empty:
+            continue
+        js = ("Shiny.setInputValue('family_pick', "
+              + json.dumps({"family": g, "lens": lens, "value": value}) + ", {priority: 'event'})")
+        out.append(cui.tags.button(
+            {"type": "button", "class": "btn btn-sm btn-outline-primary me-2", "onclick": js},
+            f"{family_name(g)}: {plural(len(rows), 'commitment')} under {plural(rows['label_set'].nunique(), 'measure')}"))
+    return cui.div(cui.span(f"{name} also has commitments in ", class_="small me-1", style="color:#4b5563"), *out,
+                   class_="mb-3")
+
 
 def facts(name, kind, df, definition=None, note=None, *, of=None, of_what=None):
     """The head of a lens: what it is, and how many projects of how many have
