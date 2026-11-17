@@ -212,7 +212,7 @@ def figure(n: dict) -> str:
           f"Kept if the probability is {floor} or more ({cyber} for cybersecurity).")
     tested = _n(g("measures", "overlap_tested"), "sentences tested")
     f.box(BX, 886, BW, 120, "mod", "C5", "Resolve overlaps",
-          "A sentence kept by two measures is tested again for each, with the other definition beside it. "
+          "A sentence kept by two measures of one group is tested again for each, with the other definition beside it. "
           f"Kept at {f_pair} or more." + (f" {tested}." if tested else ""), "DECISION MODEL")
     f.box(BX, 1040, BW, 92, "mod", "C6", "Assign types",
           f"Each sentence takes every type of its measure it fits at {f_type} or more.", "DECISION MODEL")
@@ -331,7 +331,7 @@ def page(n: dict) -> str:
     return f"""<style>{CSS}</style>
 <div class="wbg-about">
 <h2>Method</h2>
-<p class="lede">This app identifies the climate resilience measures that World Bank investment projects commit to in their
+<p class="lede">This app identifies the measures that World Bank investment projects commit to in their
 disclosed documents, the digital assets those projects finance, and the procurement through which the commitments are
 carried out. This page sets out the definitions, the scope, the pipeline, the models and the limitations.</p>
 {f'<p class="asof">Data as of {as_of:%d %B %Y}</p>' if as_of is not None else ''}
@@ -339,9 +339,10 @@ carried out. This page sets out the definitions, the scope, the pipeline, the mo
 <section><h3>Definitions</h3>
 <dl class="words">
 <div><dt>Commitment</dt><dd>A statement in a project document that the project will or may finance, deliver or require a
-resilience measure. The unit of count is one project, measure, type and digital asset, supported by at least one sentence.</dd></div>
-<div><dt>Measure</dt><dd>One of {measures} defined categories of climate resilience action, for example backup power, early
-warning, or climate-informed siting.</dd></div>
+measure. The unit of count is one project, measure, type and digital asset, supported by at least one sentence.</dd></div>
+<div><dt>Measure</dt><dd>One of {measures} defined categories of action, for example backup power, early
+warning, or cloud strategy. Measures are kept in groups (climate resilience; cloud, datacenters and data), chosen on
+the Home page; a group's counts never include another's.</dd></div>
 <div><dt>Type</dt><dd>A subcategory of a measure, for example cell broadcast within early warning.{f' {types} types;' if types else ''}
 a sentence may hold more than one.</dd></div>
 <div><dt>Digital asset</dt><dd>One of {assets} defined categories of digital infrastructure or system a project finances, from
