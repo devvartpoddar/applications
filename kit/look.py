@@ -11,7 +11,12 @@ from kit.theme import palette
 
 _DEFAULT = {
     "font": "Inter, system-ui, sans-serif",
-    "size": 13.5, "size_s": 12.5, "size_xs": 11.5, "size_label": 12.5, "size_num": 13,
+    # the one type scale: a page title and a big number, a subtitle, body text, small text (notes, labels, axes); two
+    # weights (400, 600) and three greys (ink for text, ink2 for labels, muted for notes)
+    "type": {"t": (22, 1.2), "h": (16, 1.3), "b": (14, 1.45), "s": (12.5, 1.45)},
+    "size": 14, "size_s": 12.5,
+    # one card: its padding, its title bar, the gap between cards
+    "pad": 16, "head_h": 44, "gap": 16,
     "ink": "#1b1f24", "ink2": "#4b5563", "muted": "#6b7280", "line": "#d9dde3", "rule": "#eceef1", "mist": "#f4f5f7",
     "blue": "#2458b3", "hover": "#f4f7fc", "selected": "#dde8f9",
     # the one blue ramp that says how much (map, heat map, bars): its first step is clearly apart from the
@@ -58,12 +63,32 @@ def css() -> str:
     """The variables every component reads, and the rules that make everything clickable behave the same way."""
     L = look()
     st = "".join(f"--k-st-{k.lower().replace(' ', '-')}: {v}; " for k, v in L["status"].items())
+    ty = L["type"]
+    fs = "".join(f"--k-fs-{k}: {v[0]}px; " for k, v in ty.items())
     return f"""
-:root {{ --k-font: {L['font']}; --k-size: {L['size']}px; --k-size-s: {L['size_s']}px; --k-ink: {L['ink']}; --k-ink2: {L['ink2']};
+:root {{ {fs}--k-lh-t: {ty['t'][1]}; --k-lh: {ty['b'][1]}; --k-lh-s: {ty['s'][1]}; --k-pad: {L['pad']}px; --k-gap: {L['gap']}px;
+  --bs-body-font-size: {ty['b'][0]}px; --bs-body-line-height: {ty['b'][1]}; --bs-card-spacer-y: {L['pad']}px; --bs-card-spacer-x: {L['pad']}px;
+  --k-font: {L['font']}; --k-size: {L['size']}px; --k-size-s: {L['size_s']}px; --k-ink: {L['ink']}; --k-ink2: {L['ink2']};
   --k-muted: {L['muted']}; --k-line: {L['line']}; --k-rule: {L['rule']}; --k-mist: {L['mist']}; --k-blue: {L['blue']};
   --k-bar: {L['bar']}; --k-hover: {L['hover']}; --k-selected: {L['selected']}; --k-radius: {L['radius']}px;
   --k-radius-lg: {L['radius_lg']}px; --k-row-h: {L['row_h']}px; --k-inv-bg: {L['investment'][0]}; --k-inv: {L['investment'][1]};
   --k-pol-bg: {L['policy'][0]}; --k-pol: {L['policy'][1]}; {st} }}
+/* the type scale everywhere: body, inputs, cards */
+body {{ font-size: var(--k-fs-b); line-height: var(--k-lh); color: var(--k-ink); }}
+.form-control, .form-select, .selectize-input, .selectize-input input, .selectize-dropdown, .form-check-label, .control-label,
+.shiny-input-container > label, .btn, .navbar .nav-link {{ font-size: var(--k-fs-b); }}
+.selectize-input, .selectize-input input {{ color: var(--k-ink); }}
+.shiny-input-container > label, .control-label {{ font-weight: 600; color: var(--k-ink2); font-size: var(--k-fs-s); margin-bottom: 4px; }}
+.btn-sm {{ font-size: var(--k-fs-s); }}
+h1, h2, h3, .h3, .h4 {{ font-size: var(--k-fs-t); line-height: var(--k-lh-t); font-weight: 600; }}
+h4, h5, h6, .h5 {{ font-size: var(--k-fs-h); line-height: var(--k-lh-t); font-weight: 600; }}
+.card {{ margin-bottom: var(--k-gap); }}
+.card > .card-header {{ font-size: var(--k-fs-b); font-weight: 600; line-height: var(--k-lh); padding: 0 var(--k-pad); min-height: {L['head_h']}px;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; }}
+.card > .card-body {{ padding: var(--k-pad); }}
+.bslib-grid {{ gap: var(--k-gap); }}
+.bslib-grid > .card, .bslib-grid > div > .card {{ margin-bottom: 0; }}
+.bslib-grid {{ margin-bottom: var(--k-gap); }}
 /* anything that can be clicked: the same pointer, the same hover, the same focus ring */
 .kit-heat .h, .kb-row, tr.go, .pc-q, .pc-tab, .wbg-trow, .wbg-pkgline, .kit-card, .wbg-seg button, .pc-qchip {{ cursor: pointer; }}
 .kb-row:hover, tr.go:hover td, .wbg-trow:not(.head):hover, .wbg-pkgline:hover, .pc-q:hover {{ background: var(--k-hover); }}
@@ -71,7 +96,7 @@ def css() -> str:
 button:focus-visible, tr.go:focus-visible, .wbg-trow:focus-visible {{ outline: 2px solid var(--k-blue); outline-offset: 1px; }}
 /* one tooltip: what it is, then the count */
 .kit-tip {{ position: fixed; z-index: 3000; display: none; pointer-events: none; max-width: 320px; padding: 6px 10px; border-radius: var(--k-radius);
-  background: var(--k-ink); color: #fff; font: 400 var(--k-size-s)/1.35 var(--k-font); box-shadow: 0 2px 8px rgba(0,0,0,.25); }}
+  background: var(--k-ink); color: #fff; font: 400 var(--k-fs-s)/var(--k-lh-s) var(--k-font); box-shadow: 0 2px 8px rgba(0,0,0,.25); }}
 .kit-tip b {{ display: block; font-weight: 600; }}
 """
 

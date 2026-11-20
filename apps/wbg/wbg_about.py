@@ -9,18 +9,18 @@ import textwrap
 
 CSS = """
 .wbg-about{--paper:var(--bs-body-bg,#fff);--ink:var(--bs-body-color,#1b1f24);--mist:var(--bs-light,#f4f5f7);
-  --line:var(--bs-border-color,#d9dde3);--soft:#4b5563;--faint:#6b7280;--blue:var(--bs-primary,#2458b3);
+  --line:var(--bs-border-color,#d9dde3);--soft:var(--k-ink2);--faint:var(--k-muted);--blue:var(--bs-primary,#2458b3);
   --wash:#e8eefa;--grey:#9aa1ac;max-width:1350px;padding-bottom:40px}
-.wbg-about h2{font-size:1.75rem;font-weight:600;margin:1.25rem 0 .4rem}
-.wbg-about h3{font-size:1.2rem;font-weight:600;margin:0 0 .25rem}
+.wbg-about h2{font-size: var(--k-fs-t);font-weight:600;margin:1.25rem 0 .4rem}
+.wbg-about h3{font-size: var(--k-fs-h);font-weight:600;margin:0 0 .25rem}
 .wbg-about section{margin-top:2.6rem}
 .wbg-about .lede,.wbg-about .sub{color:var(--soft);max-width:72ch}
 .wbg-about .sub{margin-bottom:1rem}
-.wbg-about .asof{font-size:.8rem;color:var(--faint);margin-top:.5rem}
+.wbg-about .asof{font-size: var(--k-fs-s);color:var(--faint);margin-top:.5rem}
 .wbg-about dl.words{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:0 32px;margin:0}
 .wbg-about dl.words div{padding:11px 0;border-top:1px solid var(--line);min-width:0}
 .wbg-about dt{font-weight:600}
-.wbg-about dd{margin:2px 0 0;color:var(--soft);font-size:.93rem}
+.wbg-about dd{margin:2px 0 0;color:var(--soft);font-size: var(--k-fs-b)}
 .wbg-about figure{margin:0}
 .wbg-about .scroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--paper)}
 .wbg-about .scroll svg{display:block;width:100%;min-width:1040px;height:auto}
@@ -48,8 +48,8 @@ CSS = """
 .wbg-about svg .mk{fill:var(--ink)}
 .wbg-about svg .mkd{fill:var(--grey)}
 .wbg-about svg .n.out ~ text.t,.wbg-about svg .n.out ~ text.d{fill:var(--paper)}
-.wbg-about figcaption{color:var(--soft);font-size:.88rem;max-width:90ch;margin-top:10px}
-.wbg-about .key{display:flex;flex-wrap:wrap;gap:8px 20px;list-style:none;margin:12px 0 0;padding:0;font-size:.85rem;color:var(--soft)}
+.wbg-about figcaption{color:var(--soft);font-size: var(--k-fs-b);max-width:90ch;margin-top:10px}
+.wbg-about .key{display:flex;flex-wrap:wrap;gap:8px 20px;list-style:none;margin:12px 0 0;padding:0;font-size: var(--k-fs-b);color:var(--soft)}
 .wbg-about .key li{display:flex;gap:7px;align-items:center}
 .wbg-about .key i{width:16px;height:12px;border-radius:3px;border:1.4px solid var(--grey);background:var(--paper)}
 .wbg-about .key .mod{background:var(--wash);border-color:var(--blue)}
@@ -59,30 +59,30 @@ CSS = """
 .wbg-about .key .ar.d{border-top:1.6px dashed var(--grey)}
 .wbg-about .models{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
 .wbg-about .model{border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0;background:var(--paper)}
-.wbg-about .model .role{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;font-weight:600;color:var(--blue)}
-.wbg-about .model h4{font-size:1rem;font-weight:600;margin:2px 0}
-.wbg-about .model code{font-size:.78rem;color:var(--faint);overflow-wrap:anywhere}
-.wbg-about .model p{color:var(--soft);font-size:.93rem;margin:6px 0 0}
+.wbg-about .model .role{font-size: var(--k-fs-s);letter-spacing:.08em;text-transform:uppercase;font-weight:600;color:var(--blue)}
+.wbg-about .model h4{font-size: var(--k-fs-h);font-weight:600;margin:2px 0}
+.wbg-about .model code{font-size: var(--k-fs-s);color:var(--faint);overflow-wrap:anywhere}
+.wbg-about .model p{color:var(--soft);font-size: var(--k-fs-b);margin:6px 0 0}
 .wbg-about .scale{margin-top:22px;max-width:820px}
 .wbg-about .scale .strip,.wbg-about .scale .brace{display:grid;grid-template-columns:repeat(4,1fr);gap:3px}
-.wbg-about .scale .g{padding:9px 10px;background:var(--mist);border-radius:6px;font-size:.85rem;min-width:0;color:var(--soft)}
-.wbg-about .scale .g b{display:block;font-size:1rem;color:var(--ink)}
+.wbg-about .scale .g{padding:9px 10px;background:var(--mist);border-radius:6px;font-size: var(--k-fs-b);min-width:0;color:var(--soft)}
+.wbg-about .scale .g b{display:block;font-size: var(--k-fs-h);color:var(--ink)}
 .wbg-about .scale .g.y{background:var(--wash)}
-.wbg-about .scale .brace{margin-top:5px;font-size:.82rem;color:var(--soft)}
+.wbg-about .scale .brace{margin-top:5px;font-size: var(--k-fs-b);color:var(--soft)}
 .wbg-about .scale .brace div:last-child{grid-column:3/5;border-top:2px solid var(--blue);padding-top:5px}
 .wbg-about .cover{display:grid;gap:8px;max-width:820px}
 .wbg-about .cover .row{display:grid;grid-template-columns:54px 1fr;gap:12px;align-items:start}
-.wbg-about .cover .num{font-weight:600;font-size:1.3rem;line-height:26px;text-align:right;font-variant-numeric:tabular-nums}
+.wbg-about .cover .num{font-weight:600;font-size: var(--k-fs-t);line-height:26px;text-align:right;font-variant-numeric:tabular-nums}
 .wbg-about .cover .b{height:26px;border-radius:5px;background:var(--blue);min-width:4px}
 .wbg-about .cover .cell{min-width:0;display:grid;gap:4px}
-.wbg-about .cover .lab{font-size:.9rem}
-.wbg-about .cover .lab small{color:var(--faint);display:block;font-size:.82rem}
+.wbg-about .cover .lab{font-size: var(--k-fs-b)}
+.wbg-about .cover .lab small{color:var(--faint);display:block;font-size: var(--k-fs-b)}
 .wbg-about ol.limits{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:0 36px;counter-reset:l}
 .wbg-about ol.limits li{counter-increment:l;padding:14px 0 14px 34px;border-top:1px solid var(--line);position:relative;min-width:0}
-.wbg-about ol.limits li::before{content:counter(l);position:absolute;left:0;top:14px;font-weight:600;font-size:.78rem;line-height:22px;width:22px;height:22px;text-align:center;border-radius:50%;background:var(--mist);color:var(--soft)}
-.wbg-about ol.limits h4{margin:0 0 3px;font-size:1rem;font-weight:600}
-.wbg-about ol.limits p{color:var(--soft);font-size:.93rem;margin:0}
-.wbg-about ol.limits .next{margin-top:5px;color:var(--ink);font-size:.88rem}
+.wbg-about ol.limits li::before{content:counter(l);position:absolute;left:0;top:14px;font-weight:600;font-size: var(--k-fs-s);line-height:22px;width:22px;height:22px;text-align:center;border-radius:50%;background:var(--mist);color:var(--soft)}
+.wbg-about ol.limits h4{margin:0 0 3px;font-size: var(--k-fs-h);font-weight:600}
+.wbg-about ol.limits p{color:var(--soft);font-size: var(--k-fs-b);margin:0}
+.wbg-about ol.limits .next{margin-top:5px;color:var(--ink);font-size: var(--k-fs-b)}
 """
 
 MODELS = {"embedding": "openai/text-embedding-3-large", "decision": "typesafe/jev-1.13-20260917",

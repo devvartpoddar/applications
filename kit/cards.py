@@ -11,47 +11,47 @@ from shiny import ui
 CSS = """
 .kit-tile { background: var(--bs-body-bg, #fff); border: 1px solid var(--bs-border-color, #d9dde3); border-radius: 6px;
   padding: 10px 14px; display: flex; flex-direction: column; gap: 2px; min-width: 0; height: 100%; }
-.kit-tile-label { font-size: 0.82rem; color: var(--bs-secondary-color, #6b7280); }
-.kit-tile-value { font-size: 1.6rem; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; }
-.kit-tile-note { font-size: 0.75rem; color: var(--bs-secondary-color, #6b7280); }
+.kit-tile-label { font-size: var(--k-fs-b); color: var(--bs-secondary-color, var(--k-muted)); }
+.kit-tile-value { font-size: var(--k-fs-t); font-weight: 600; line-height: var(--k-lh-t); font-variant-numeric: tabular-nums; }
+.kit-tile-note { font-size: var(--k-fs-s); color: var(--bs-secondary-color, var(--k-muted)); }
 .kit-board { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; align-items: start; }
 .kit-col { background: var(--bs-light, #f4f5f7); border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.kit-col > header { display: flex; justify-content: space-between; align-items: center; gap: 6px; font-size: 12.5px; }
+.kit-col > header { display: flex; justify-content: space-between; align-items: center; gap: 6px; font-size: var(--k-fs-s); }
 .kit-col .count { color: var(--bs-body-color, #1b1f24); font-weight: 600; }
-.kit-pill { display: inline-block; font-size: 13px; font-weight: 500; padding: 1px 8px; border-radius: 99px; background: var(--bs-body-bg, #fff); }
+.kit-pill { display: inline-block; font-size: var(--k-fs-b); font-weight: 600; padding: 1px 8px; border-radius: 99px; background: var(--bs-body-bg, #fff); }
 .kit-card { text-align: left; width: 100%; background: var(--bs-body-bg, #fff); border: 1px solid var(--bs-border-color, #d9dde3); border-radius: 6px;
-  padding: 6px 9px; display: flex; flex-direction: column; gap: 2px; font-size: 13px; cursor: pointer; color: inherit; }
+  padding: 6px 9px; display: flex; flex-direction: column; gap: 2px; font-size: var(--k-fs-b); cursor: pointer; color: inherit; }
 .kit-card:hover { border-color: var(--bs-primary, #2458b3); }
 .kit-card .t { font-weight: 600; color: var(--bs-primary, #2458b3); }
-.kit-card .s { font-size: 13px; line-height: 1.35; color: #4b5563; }
+.kit-card .s { font-size: var(--k-fs-b); line-height: var(--k-lh-s); color: var(--k-ink2); }
 .kit-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
-.kit-more { font-size: 13px; color: var(--bs-secondary, #6b7280); padding: 2px; }
+.kit-more { font-size: var(--k-fs-b); color: var(--bs-secondary, var(--k-muted)); padding: 2px; }
 /* Tags: one look per kind of thing, told apart by form (solid, tint, outline), not by a colour each. */
-.kit-tag { display: inline-block; font-size: 12.5px; line-height: 1.3; padding: 2px 8px; border-radius: 4px; margin: 0 4px 4px 0;
+.kit-tag { display: inline-block; font-size: var(--k-fs-s); line-height: var(--k-lh-s); padding: 2px 8px; border-radius: 4px; margin: 0 4px 4px 0;
   border: 1px solid transparent; vertical-align: top; }
 .kit-tag-solid { background: var(--bs-dark, #1b1f24); color: #fff; font-weight: 600; }
 .kit-tag-tint { background: #e3ebf8; color: #1a4287; border-color: #c5d5f0; }
 .kit-tag-outline { background: var(--bs-body-bg, #fff); color: var(--bs-body-color, #1b1f24); border-color: #9aa3af; }
-.kit-tag-plain { background: var(--bs-light, #f4f5f7); color: #4b5563; }
-.kit-dot { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.kit-tag-plain { background: var(--bs-light, #f4f5f7); color: var(--k-ink2); }
+.kit-dot { display: inline-flex; align-items: center; gap: 5px; font-size: var(--k-fs-s); font-weight: 600; white-space: nowrap; }
 .kit-dot::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
 .kit-dot.hollow::before { background: transparent; border: 1.5px dashed currentColor; }
-.kit-quote { border-left: 3px solid var(--bs-border-color, #d9dde3); padding: 2px 0 2px 10px; margin: 4px 0 6px; font-size: 13.5px;
-  line-height: 1.45; color: var(--bs-body-color, #1b1f24); }
+.kit-quote { border-left: 3px solid var(--bs-border-color, #d9dde3); padding: 2px 0 2px 10px; margin: 4px 0 6px; font-size: var(--k-fs-b);
+  line-height: var(--k-lh); color: var(--bs-body-color, #1b1f24); }
 .kit-quote details { display: inline; }
-.kit-quote details > summary { display: inline; cursor: pointer; color: var(--bs-primary, #2458b3); list-style: none; font-weight: 500; }
+.kit-quote details > summary { display: inline; cursor: pointer; color: var(--bs-primary, #2458b3); list-style: none; font-weight: 600; }
 .kit-quote details > summary::-webkit-details-marker { display: none; }
 .kit-quote details[open] > summary { display: none; }
-.kit-quote .foot { display: block; margin-top: 2px; font-size: 12.5px; color: #4b5563; }
+.kit-quote .foot { display: block; margin-top: 2px; font-size: var(--k-fs-s); color: var(--k-ink2); }
 .kit-fold { border: 1px solid var(--bs-border-color, #d9dde3); border-radius: 6px; margin-bottom: 8px; background: var(--bs-body-bg, #fff); }
 .kit-fold > summary { cursor: pointer; padding: 8px 10px; list-style: none; display: flex; gap: 8px; align-items: baseline; }
 .kit-fold > summary::-webkit-details-marker { display: none; }
-.kit-fold > summary::before { content: "▸"; color: #4b5563; flex: none; }
+.kit-fold > summary::before { content: "▸"; color: var(--k-ink2); flex: none; }
 .kit-fold[open] > summary::before { content: "▾"; }
 .kit-fold[open] > summary { border-bottom: 1px solid var(--bs-border-color, #d9dde3); }
 .kit-fold > .body { padding: 10px; }
 .kit-fold .t { font-weight: 600; color: var(--bs-primary, #2458b3); }
-.kit-fold .s { font-size: 13px; color: #4b5563; }
+.kit-fold .s { font-size: var(--k-fs-b); color: var(--k-ink2); }
 """
 
 TAG_KINDS = ("solid", "tint", "outline", "plain")

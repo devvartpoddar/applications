@@ -12,10 +12,10 @@ CSS = """
 .kb { display: flex; flex-direction: column; gap: 2px; }
 .kb-row { display: grid; grid-template-columns: var(--kb-l, 220px) minmax(60px, 1fr); gap: 12px; align-items: center; width: 100%;
   min-height: var(--k-row-h); padding: 2px 4px; border: 0; background: none; border-radius: var(--k-radius); text-align: left; font: inherit; color: inherit; }
-.kb-l { font-size: var(--k-size-s); line-height: 1.25; text-align: right; overflow-wrap: normal; }
+.kb-l { font-size: var(--k-size-s); line-height: var(--k-lh-s); text-align: right; overflow-wrap: normal; }
 .kb-t { display: flex; align-items: center; gap: 8px; height: 18px; min-width: 0; }
 .kb-f { display: block; flex: none; height: 100%; min-width: 2px; background: var(--k-bar); border-radius: var(--k-radius); }
-.kb-v { font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.kb-v { font-size: var(--k-fs-b); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .kb-note { font-size: var(--k-size-s); color: var(--k-muted); margin: 6px 0 0; }
 @media (max-width: 576px) { .kb-row { grid-template-columns: 110px 1fr; gap: 8px; } }
 """

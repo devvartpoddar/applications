@@ -160,7 +160,7 @@ def world(iso2, values, names, *, title: str | None = None, height: int = 420, l
     fig = go.Figure(go.Choropleth(
         locations=[r[0] for r in rows], z=[r[1] for r in rows], text=[r[2] for r in rows],
         locationmode="ISO-3",
-        colorscale=[[i / 4, ramp(i / 4)] for i in range(5)] if shaded else [[0, ramp(0.75)], [1, ramp(0.75)]],
+        colorscale=[[i / 4, ramp(i / 4)] for i in range(5)] if shaded else [[0, ramp(0.7)], [1, ramp(0.7)]],
         showscale=shaded, marker_line_color="#ffffff", marker_line_width=0.5,
         colorbar={"thickness": 10, "len": 0.5, "outlinewidth": 0, "x": 0.0, "xanchor": "left", "y": 0.12, "yanchor": "bottom",
                   "title": {"text": label, "side": "right", "font": {"size": 11.5}}, "tickfont": {"size": 11}},

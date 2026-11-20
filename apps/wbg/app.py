@@ -354,6 +354,21 @@ def seg(name, current, options):
                    class_="wbg-seg")
 
 
+def tlinks(name, current, options):
+    """A quiet filter as text links, the one chosen in bold: options [(value, label, count)]; one with no count is left out."""
+    if sum(1 for v, _, n in options if v != "all" and n) < 2:
+        return None          # nothing to narrow
+    out = []
+    for v, lab, n in options:
+        if n == 0 and v != current:
+            continue
+        if out:
+            out.append(cui.span("·", class_="dot"))
+        out.append(cui.tags.button({"type": "button", "class": "on" if v == current else "", "onclick": L.js("seg", {"name": name, "value": v})},
+                                   lab, cui.span(f" {n:,}", class_="c")))
+    return cui.div(*out, class_="wbg-tlinks")
+
+
 def unit_ctl():
     """The Count switch, the same small control at the right of the title row of every page it applies to."""
     return cui.div(cui.span("Count", class_="lb"), seg("unit", unit_v.get(), [("activities", "Activities", None), ("projects", "Projects", None)]),
@@ -456,32 +471,54 @@ with ui.nav_panel(START):
 
 # ---------------------------------------------------------------- the pieces the views share
 
+INSTRUMENTS = (("investment", "Investment"), ("policy", "Policy"))
+
+
 def heat(df, row, col, *, rows, cols, row_label=lambda v: v, col_label=lambda v: v, where=None, row_nav=None, col_nav=None,
-         col_hover=None, cell_w=56, label_w=250, max_cell=150, of=None, tot_label="All"):
+         col_hover=None, cell_w=56, label_w=250, of=None, tot_label="All", instrument=False, col_group="By asset"):
     """A rows x cols grid of activities (or projects) with a total on each row and column; a click on a tile or a
     total opens what is behind it. rows / cols: the values to show, in order, of the columns row / col of df (a
-    column that holds several is expanded: an activity counts under each of its assets)."""
+    column that holds several is expanded: an activity counts under each of its assets). instrument: two more
+    columns after a divider, Investment and Policy, shaded on their own (an activity's instrument is one reading,
+    its assets another, so All is the row's activities, not the sum of the two groups)."""
     if df.empty or not rows or not cols:
-        return cui.p("Nothing under these filters.", class_="wbg-muted")
+        return cui.p("Nothing under these filters.", class_="wbg-muted mb-0")
     where = where or {}
     both = expand(expand(df, row), col)
     c = tally(both, row, col, of=of)
     look = {(r[row], r[col]): r for _, r in c.iterrows()}
+    rf, cf = expand(df, row), expand(df, col)
     z = [[int(look[(r, k)]["n"]) if (r, k) in look else None for k in cols] for r in rows]
     hover = [[f"{row_label(r)} · {col_label(k)}\n{of_text(look[(r, k)])}" if (r, k) in look else None for k in cols] for r in rows]
     keys = [[{"title": f"{row_label(r)} · {col_label(k)}", "where": {**where, row: r, col: k}} for k in cols] for r in rows]
-    rf, cf = expand(df, row), expand(df, col)
-    row_tot = [cnt(rf[rf[row] == r]) for r in rows]
+    names = [col_label(k) for k in cols]
     col_tot = [cnt(cf[cf[col] == k]) for k in cols]
+    col_keys = [{"title": col_label(k), "where": {**where, col: k}} for k in cols]
+    nav = list(col_nav) if col_nav else [None] * len(cols)
+    tips = list(col_hover or [str(k) for k in cols])
+    groups = None
+    if instrument:
+        ci = tally(rf, row, "instrument", of=of)
+        li = {(r[row], r["instrument"]): r for _, r in ci.iterrows()}
+        for i, r in enumerate(rows):
+            z[i] += [int(li[(r, v)]["n"]) if (r, v) in li else None for v, _ in INSTRUMENTS]
+            hover[i] += [f"{row_label(r)} · {lab}\n{of_text(li[(r, v)])}" if (r, v) in li else None for v, lab in INSTRUMENTS]
+            keys[i] += [{"title": f"{row_label(r)} · {lab}", "where": {**where, row: r, "instrument": v}} for v, lab in INSTRUMENTS]
+        names += [lab for _, lab in INSTRUMENTS]
+        col_tot += [cnt(df[df["instrument"] == v]) for v, _ in INSTRUMENTS]
+        col_keys += [{"title": lab, "where": {**where, "instrument": v}} for v, lab in INSTRUMENTS]
+        nav += [{"title": lab, "where": {**where, "instrument": v}} for v, lab in INSTRUMENTS]
+        tips += [f"{lab}\nWhat the documents read as {lab.lower()}: click for all of them" for _, lab in INSTRUMENTS]
+        groups = [(col_group, len(cols)), ("By instrument", len(INSTRUMENTS))]
+    row_tot = [cnt(rf[rf[row] == r]) for r in rows]
     note = cui.p("Counting projects: a project counts once in each tile it has an activity in, so the tiles do not add up to the "
-                 "totals' projects.", class_="kit-heat-note") if by_projects() else None
+                 "totals.", class_="kit-heat-note") if by_projects() else None
     return cui.div(kit.heat_table(
-        [row_label(r) for r in rows], [col_label(k) for k in cols], z, row_tot=row_tot, col_tot=col_tot, grand=cnt(df),
-        keys=keys, hover=hover, col_hover=col_hover or [str(k) for k in cols],
-        row_keys=[{"title": row_label(r), "where": {**where, row: r}} for r in rows],
-        col_keys=[{"title": col_label(k), "where": {**where, col: k}} for k in cols],
+        [row_label(r) for r in rows], names, z, row_tot=row_tot, col_tot=col_tot, grand=cnt(df),
+        keys=keys, hover=hover, col_hover=tips, groups=groups,
+        row_keys=[{"title": row_label(r), "where": {**where, row: r}} for r in rows], col_keys=col_keys,
         grand_key={"title": "All", "where": where} if where else {"title": "Everything in this view", "where": {}},
-        row_nav=row_nav, col_nav=col_nav, cell_w=cell_w, label_w=label_w, max_cell=max_cell, tot_label=tot_label), note)
+        row_nav=row_nav, col_nav=nav if any(nav) else None, cell_w=cell_w, label_w=label_w, tot_label=tot_label), note)
 
 
 def bars(df, col, *, where=None, label=lambda v: v, title=None, order=None, zeros=False, colors=None, of=None, label_w=220):
@@ -507,7 +544,7 @@ def lens_map(df, where, *, height=420, go=False):
     c = tally(df[~df["is_regional"].fillna(False).astype(bool)], "country_code", "place")
     if c.empty:
         return kit.empty("", "nothing on the map under these filters")
-    fig = kit.world(c["country_code"], c["n"], c["place"], height=height, label=unit_word(), shaded=True,
+    fig = kit.world(c["country_code"], c["n"], c["place"], height=height, label=unit_word(),
                     hover=[f"<b>{r['place']}</b><br>{of_text(r)}" for _, r in c.iterrows()])
     names = list(fig.data[0].text) if len(fig.data) else []
     fig.data[0].customdata = [{"go": "country", "value": n} if go else {"title": n, "where": {**where, "place": n}} for n in names]
@@ -536,17 +573,20 @@ def facts(name, kind, df, definition=None, note=None, *, of=None, of_what="proje
         class_="wbg-head")
 
 
-def project_facts(r, df):
-    """A project's facts in one band: its name and id, then practice, amount, approval, closing, and what it commits to."""
+def project_facts(r, df, bare=False):
+    """A project's facts in one band: its name and id, then practice, amount, approval, closing, and what it commits to.
+    bare: the facts only, for a head that already names the project."""
     if r is None:
-        return cui.p(df["project_name"].iloc[0], class_="fw-semibold mb-0")
+        return None if bare else cui.p(df["project_name"].iloc[0], class_="fw-semibold mb-0")
     val = lambda v, f: f(v) if v is not None and pd.notna(v) else "—"  # noqa: E731
     items = [("Practice", r["practice"] or "—"), ("Amount", val(r["commitment_usd_millions"], lambda v: L.money(v * 1e6))),
              ("Approved", val(r["approval_fiscal_year"], lambda v: f"FY{int(v)}")), ("Closes", L.day(r["closing_date"]) or "—"),
              ("Measures", f"{int(r['measures']):,}"), ("Activities", f"{int(r['activities']):,}"),
              ("Next procurement", val(r["next_package_date"], L.day))]
-    return cui.div(cui.div(cui.div(r["project_name"], class_="nm"), cui.div(r["project_id"], class_="id"), class_="who"),
-                   cui.div(*[cui.div(cui.span(k, class_="k"), cui.span(v, class_="v")) for k, v in items], class_="facts"),
+    band = cui.div(*[cui.div(cui.span(k, class_="k"), cui.span(v, class_="v")) for k, v in items], class_="facts")
+    if bare:
+        return band
+    return cui.div(cui.div(cui.div(r["project_name"], class_="nm"), cui.div(r["project_id"], class_="id"), class_="who"), band,
                    class_="wbg-pfacts")
 
 
@@ -625,13 +665,18 @@ def proc_section(key, scope, *, tabs=True, hide=(), tab=None, title="Linked proc
             # one line in place of the card: the card's header is hidden by the css when this is all it holds
             return cui.div(cui.tags.b(title), cui.span("No procurement package is linked to these activities.", class_="wbg-muted"),
                            class_="wbg-proc-empty")
-        return L.proc_calendar(scope(), key, s["q"], pd.Timestamp.today().normalize())
+        _, t, _ = eff(key)
+        return L.proc_calendar(scope(), key, s["q"], pd.Timestamp.today().normalize(),
+                               tab=L.first_tab(scope(), t) if tabs else None)
 
     def listing():
         s, t, sort = eff(key)
         if scope().empty:
             return None
-        return L.proc_list(scope(), key, tab() if tab else t, sort, s["desc"], s["limit"], s["q"], asset_names(),
+        t = tab() if tab else L.first_tab(scope(), t)
+        if not s["sort"]:
+            sort = "country" if t == "Contract completed" else "date"
+        return L.proc_list(scope(), key, t, sort, s["desc"], s["limit"], s["q"], asset_names(),
                            tabs=tabs, hide=hide, page=s["page"] if key == "pg" else None)
 
     calendar.__name__, listing.__name__ = f"{key}_pcal", f"{key}_plist"
@@ -694,8 +739,8 @@ with ui.sidebar(id="panel", position="right", open="closed", width=560, title="W
             cui.h5(d["title"]),
             cui.div(f"{L.n_acts(df['activity_id'].nunique())} · "
                     f"{L.plural(df['project_id'].nunique(), 'project')} · {L.plural(sentences, 'sentence')}", class_="tot"),
-            cui.div(seg("panel_inst", panel_inst.get(), [("all", "All", len(whole)), ("investment", "Investment", n_inv),
-                                                         ("policy", "Policy", n_pol)]),
+            cui.div(tlinks("panel_inst", panel_inst.get(), [("all", "All", len(whole)), ("investment", "Investment", n_inv),
+                                                            ("policy", "Policy", n_pol)]),
                     cui.download_button("dl_panel", "Download these", class_="btn btn-sm btn-outline-primary") if len(df) else None,
                     class_="wbg-bar"), class_="wbg-ph")
         if df.empty:
@@ -797,12 +842,12 @@ with ui.nav_panel("Overview"):
                                    cui.span(f"{value:,}", class_="v"), attrs)
                 n = df["project_id"].nunique()
                 return cui.div(
-                    fig("Projects read", len(b), "with a document read"),
+                    fig("Projects read", len(b)),
                     fig("With an activity", n, f"{n / len(b):.0%} of the projects read" if len(b) else None, where={}),
-                    fig("Activities", len(df), "what the projects commit to do", where={}),
+                    fig("Activities", len(df), where={}),
                     fig("of which investment", int((df["instrument"] == "investment").sum()), sub=True, where={"instrument": "investment"}),
                     fig("of which policy", int((df["instrument"] == "policy").sum()), sub=True, where={"instrument": "policy"}),
-                    fig("Linked packages", len(pk), "procurement linked to an activity"), class_="wbg-figs")
+                    fig("Linked packages", len(pk)), class_="wbg-figs")
 
         with ui.card():
             ui.card_header("Where")
@@ -818,7 +863,7 @@ with ui.nav_panel("Overview"):
                 return f"{unit_n(n)} {'are' if n != 1 else 'is'} in regional projects and not on the map."
 
     with ui.card():
-        ui.card_header("Measures by asset")
+        ui.card_header("Measures by asset and instrument")
 
         @render.ui
         def ov_heat():
@@ -829,7 +874,7 @@ with ui.nav_panel("Overview"):
             ms = [m for m in df.groupby("label_set").size().sort_values(ascending=False).index]
             return heat(df, "label_set", "asset", rows=ms, cols=cols, row_label=lambda m: names.get(m, m), col_label=L.short_asset,
                         col_hover=cols, row_nav=[{"go": "measure", "value": m} for m in ms],
-                        col_nav=[{"go": "asset", "value": a} for a in cols], label_w=300, max_cell=190)
+                        col_nav=[{"go": "asset", "value": a} for a in cols], label_w=300, instrument=True)
 
     with ui.card():
         ui.card_header("Procurement linked to these activities")
@@ -938,6 +983,18 @@ with ui.nav_panel("Explore"):
         @render.ui
         def c_head():
             df = lens_frame()
+            if df["project_id"].nunique() == 1:
+                # one project: the country and its project in one compact head, no hollow band
+                pf = proj_facts()
+                pf = pf[pf["project_id"] == df["project_id"].iloc[0]]
+                pid = df["project_id"].iloc[0]
+                return cui.div(
+                    cui.div(cui.span(PLACE, class_="kd"), cui.h3(input.pick()),
+                            cui.div(cui.span("One project: ", class_="lead-in"),
+                                    cui.tags.button({"type": "button", "class": "btn btn-link p-0 align-baseline", **L.clicker({"go": "project", "value": pid})},
+                                                    df["project_name"].iloc[0]), cui.span(f" · {pid}", class_="lead-in"), class_="df"),
+                            class_="tx"),
+                    project_facts(pf.iloc[0] if len(pf) else None, df, bare=True), class_="wbg-head one")
             return facts(input.pick(), PLACE, df, of=lens_base(), of_what="projects read here")
 
         @render.ui
@@ -953,20 +1010,14 @@ with ui.nav_panel("Explore"):
                 bars(df, "asset", where=where, label=L.short_asset, title=lambda a: f"{L.short_asset(a)} in {place}", order=axis(),
                      of=lens_base(), label_w=150)))
             if df["project_id"].nunique() == 1:
-                r = pf.iloc[0] if len(pf) else None
                 names = measure_names()
-                project = cui.card(
-                    cui.card_header(cui.span("The project"), cui.tags.button(
-                        {"type": "button", "class": "btn btn-link btn-sm p-0", **L.clicker({"go": "project", "value": df["project_id"].iloc[0]})},
-                        "Open the project page"), class_="d-flex justify-content-between align-items-center"),
-                    cui.card_body(project_facts(r, df)))
                 measures = cui.card(cui.card_header("Measures"), cui.card_body(
                     bars(df, "label_set", where=where, label=lambda m: names.get(m, m), of=lens_base(), label_w=220)))
                 cards = activity_cards(df.sort_values(["measure_name", "activity_label"]), pkgs_for(df), first_open=False)
                 acts_card = cui.card(cui.card_header(cui.span("What it commits to"), cui.span(L.n_acts(len(df)), class_="wbg-muted-s"),
                                                      class_="d-flex justify-content-between align-items-center"),
                                      cui.card_body(cui.div(*cards, class_="wbg-actgrid")))
-                return cui.TagList(project, cui.layout_columns(measures, assets, col_widths={"sm": (12, 12), "lg": (7, 5)}), acts_card)
+                return cui.TagList(cui.layout_columns(measures, assets, col_widths={"sm": (12, 12), "lg": (7, 5)}, class_="wbg-pair"), acts_card)
             rows = []
             for r in pf.itertuples():
                 nxt = L.day(r.next_package_date) if pd.notna(r.next_package_date) else "—"
@@ -989,7 +1040,7 @@ with ui.nav_panel("Explore"):
             ms = df.groupby("label_set").size().sort_values(ascending=False).index.tolist()
             grid = cui.card(cui.card_header("Who commits to what"), cui.card_body(
                 heat(df, "label_set", "project_id", rows=ms, cols=ps, row_label=lambda m: names.get(m, m),
-                     col_label=lambda p: pn.get(p, p), where=where, label_w=230, cell_w=72, max_cell=200,
+                     col_label=lambda p: pn.get(p, p), where=where, label_w=230, cell_w=72,
                      row_nav=[{"go": "measure", "value": m} for m in ms], col_nav=[{"go": "project", "value": p} for p in ps],
                      of=lens_base())))
             inst = cui.card(cui.card_header("Investment and policy"), cui.card_body(
@@ -1102,13 +1153,13 @@ with ui.nav_panel("Explore"):
                 mids = fam_table().loc[fam_table()["family"] == f, "label_set"].tolist()
                 nd = kit.cached(("wbg", "nd", f, pid), lambda: W.not_digital(q, project_id=pid, measure=mids, cohort=cohort()))
                 if nd.empty:
-                    return cui.p("Also read, not counted: no committed sentence was left out as not digital.", class_="wbg-muted-s mt-2 mb-0")
+                    return None
                 return cui.p(cui.tags.button({"type": "button", "class": "btn btn-link btn-sm p-0", **L.clicker({"nd": pid})},
                                              f"Also read, not counted: {L.plural(len(nd), 'committed sentence')}"),
                              " that the pipeline judged not to be about a digital asset or the digital sector. Open them to see what the rule leaves out.",
                              class_="wbg-muted-s mt-2 mb-0")
 
-        with ui.layout_columns(col_widths=[7, 5]):
+        with ui.layout_columns(col_widths={"sm": (12, 12), "lg": (7, 5)}, class_="wbg-pair"):
             with ui.card():
                 ui.card_header("Components, with cost from all funding sources")
 
@@ -1159,9 +1210,13 @@ with ui.nav_panel("Explore"):
                 d = a["asset_definition"].iloc[0] if len(a) else None
             return facts(input.pick(), "Digital asset", df, d)
 
-        with ui.layout_columns(col_widths={"sm": (12, 12), "lg": (6, 6)}):
+        with ui.layout_columns(col_widths={"sm": (12, 12), "lg": (6, 6)}, class_="wbg-pair"):
             with ui.card():
-                ui.card_header("Its asset types")
+                with ui.card_header():
+
+                    @render.text
+                    def a_types_head():
+                        return "Investment and policy" if input.pick() == L.NO_ASSET else "Its asset types"
 
                 @render.ui
                 def a_types():
@@ -1169,11 +1224,15 @@ with ui.nav_panel("Explore"):
                     a = asset_df()
                     a = a[(a["asset_name"] == name) & a["subtype_name"].notna()]
                     if a.empty:
-                        return cui.p("This is not one asset, so it has no asset types.", class_="wbg-muted")
+                        # not one asset, so no asset types: what it holds by instrument instead
+                        return bars(df, "chip", where={"asset": name}, order=["Investment", "Policy"],
+                                    title=lambda v: f"{v} · {name}", label_w=120, of=lens_base())
                     ex = expand(df, "asset_type")
                     items = []
                     for r in a.itertuples():
                         mine = ex[ex["asset_type"] == r.subtype_name]
+                        if mine.empty:
+                            continue
                         items.append({"name": r.subtype_name, "definition": r.subtype_definition, "acts": mine["activity_id"].nunique(),
                                       "projects": mine["project_id"].nunique(), "title": f"{r.subtype_name} · {name}",
                                       "where": {"asset": name, "asset_type": r.subtype_name}})
@@ -1226,13 +1285,8 @@ with ui.nav_panel("Explore"):
                        f"that a grader agreed with, on {int(m['graded_units'].iloc[0])} graded sentences"
                        + (" (the sample used for tuning, so provisional)" if m["graded_sheet"].iloc[0] != "evaluation" else "")
                        + ". It does not measure activities the method missed.")
-            whole = L.filter_acts(acts(), {"label_set": input.pick()})
-            n_inv, n_pol = int((whole["instrument"] == "investment").sum()), int((whole["instrument"] == "policy").sum())
-            ctl = cui.div(cui.span("Show", class_="wbg-muted-s"),
-                          seg("m_inst", m_inst.get(), [("all", "All", len(whole)), ("investment", "Investment", n_inv), ("policy", "Policy", n_pol)]),
-                          cui.span("filters this whole page", class_="wbg-muted-s"), class_="inst")
             return facts(measure_names().get(input.pick(), input.pick()), "Measure", df,
-                         m["definition"].iloc[0] if len(m) else None, acc, extra=ctl)
+                         m["definition"].iloc[0] if len(m) else None, acc)
 
         with ui.layout_columns(col_widths={"sm": (12, 12), "lg": (6, 6)}):
             with ui.card():
@@ -1247,7 +1301,7 @@ with ui.nav_panel("Explore"):
                     items = []
                     for r in td.itertuples():
                         mine = ex[ex["type"] == r.type_id]
-                        if mine.empty and r.is_proposed:
+                        if mine.empty:      # a type with nothing under this selection is left out
                             continue
                         items.append({"name": L.short_type(r.type_name), "definition": r.definition, "proposed": bool(r.is_proposed),
                                       "acts": mine["activity_id"].nunique(), "projects": mine["project_id"].nunique(),
@@ -1270,7 +1324,20 @@ with ui.nav_panel("Explore"):
             ui.card_header("Where it stands, by linked procurement")
             proc_section("m", lambda: pkgs_for(lens_frame()), title="Linked procurement")
 
-        with ui.layout_columns(col_widths={"sm": (12, 12), "xl": (6, 6)}):
+        if True:
+            with ui.card():
+                ui.card_header("Types by asset and instrument")
+
+                @render.ui
+                def m_heat_asset():
+                    df, m = lens_frame(), input.pick()
+                    tn = type_names(m)
+                    have = {a for l in df["assets"] for a in l}
+                    cols = [a for a in axis() if a in have]
+                    ts = sorted(expand(df, "type")["type"].dropna().unique(), key=lambda t: (t == W.NO_TYPE, str(tn.get(t, t))))
+                    return heat(df, "type", "asset", rows=ts, cols=cols, row_label=lambda t: L.short_type(tn.get(t, t)),
+                                col_label=L.short_asset, col_hover=cols, where=mwhere(m), label_w=230, of=lens_base(), instrument=True)
+
             with ui.card():
                 ui.card_header("Types by region")
 
@@ -1282,20 +1349,7 @@ with ui.nav_panel("Explore"):
                     ts = [t for t in expand(df, "type")["type"].dropna().unique()]
                     ts = sorted(ts, key=lambda t: (t == W.NO_TYPE, str(tn.get(t, t))))
                     return heat(df, "type", "region", rows=ts, cols=rg, row_label=lambda t: L.short_type(tn.get(t, t)),
-                                col_label=L.short_region, col_hover=rg, where=mwhere(m), label_w=160, of=lens_base())
-
-            with ui.card():
-                ui.card_header("Types by asset")
-
-                @render.ui
-                def m_heat_asset():
-                    df, m = lens_frame(), input.pick()
-                    tn = type_names(m)
-                    have = {a for l in df["assets"] for a in l}
-                    cols = [a for a in axis() if a in have]
-                    ts = sorted(expand(df, "type")["type"].dropna().unique(), key=lambda t: (t == W.NO_TYPE, str(tn.get(t, t))))
-                    return heat(df, "type", "asset", rows=ts, cols=cols, row_label=lambda t: L.short_type(tn.get(t, t)),
-                                col_label=L.short_asset, col_hover=cols, where=mwhere(m), label_w=160, of=lens_base())
+                                col_label=L.short_region, col_hover=rg, where=mwhere(m), label_w=230, of=lens_base())
 
 
 # ======================================================= procurement
@@ -1306,7 +1360,7 @@ with ui.nav_panel("Procurement"):
         return notice("page")
     ui.h3("Procurement linked to the family's activities", class_="h4 mt-3 mb-1")
     ui.p("Every procurement package the pipeline linked to an activity of this family. A link is the model's reading: a lead to check, "
-         "not a finding. Choose Contract completed and sort by country to see who has already done something.", class_="mb-2", style="max-width: 110ch; color:#4b5563")
+         "not a finding. Choose Contract completed and sort by country to see who has already done something.", class_="mb-2", style="max-width: 110ch; color: var(--k-ink2)")
 
     with ui.div(class_="wbg-filters"):
         ui.input_select("pg_status", "Status", ["All", *L.STATUSES], selected="All", width="200px")
@@ -1349,9 +1403,6 @@ with ui.nav_panel("Procurement"):
     with ui.card():
         ui.card_header("Linked packages")
 
-        @render.ui
-        def pg_count():
-            return cui.p(f"{L.plural(len(pg_pkgs()), 'linked package')} match the filters.", class_="wbg-muted-s mb-2")
         proc_section("pg", lambda: pg_pkgs(), tabs=False, tab=lambda: input.pg_status() or "All")
 
 
