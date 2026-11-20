@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import io
+import re
 import sys
 import time
 from pathlib import Path
@@ -436,7 +437,7 @@ def facts(name, kind, df, definition=None, note=None, *, of=None, of_what="proje
     b = base() if of is None else of
     places = df.loc[~df["is_regional"].fillna(False).astype(bool), "country_code"].nunique()
     n = df["project_id"].nunique()
-    line = [f"{n:,} of {len(b):,} {of_what}" if len(b) else f"{n:,} projects", L.n_acts(df["activity_id"].nunique())]
+    line = [re.sub(r"(?<![\d,])1 projects", "1 project", f"{n:,} of {len(b):,} {of_what}") if len(b) else L.plural(n, "project"), L.n_acts(df["activity_id"].nunique())]
     if places and kind != PLACE:
         line.append(f"{places} {'country' if places == 1 else 'countries'}")
     if kind != "Measure":
@@ -502,10 +503,14 @@ def proc_section(key, scope, *, tabs=True, hide=(), tab=None):
     page's filter), when the component has no tabs of its own."""
     def calendar():
         s, _, _ = eff(key)
+        if scope().empty:
+            return cui.p("No procurement package is linked to these activities.", class_="wbg-muted mb-0")
         return L.proc_calendar(scope(), key, s["q"], pd.Timestamp.today().normalize())
 
     def listing():
         s, t, sort = eff(key)
+        if scope().empty:
+            return None
         return L.proc_list(scope(), key, tab() if tab else t, sort, s["desc"], s["limit"], s["q"], asset_names(),
                            tabs=tabs, hide=hide)
 
@@ -1280,7 +1285,7 @@ def _dl_open():
         cui.layout_columns(
             cui.div(cui.tags.h6("What should one row be?", class_="mb-2"),
                     cui.div(cui.input_radio_buttons(
-                        "dl_level", None, {k: cui.HTML(f"<b>{html_text(t)}</b><span>{html_text(d)}</span>") for k, (t, d) in DL_LEVELS.items()},
+                        "dl_level", None, {k: cui.HTML(f"<b>{html_text(t)}</b><small>{html_text(d)}</small>") for k, (t, d) in DL_LEVELS.items()},
                         selected="activity", width="100%"), class_="dl-levels")),
             cui.div(cui.tags.h6("Filters in force", class_="mb-2"), cui.output_ui("dl_chips"),
                     cui.tags.h6("Format", class_="mt-3 mb-2"),

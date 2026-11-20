@@ -12,7 +12,7 @@ from shiny import ui
 
 CSS = """
 .kit-heat-wrap { overflow-x: auto; padding-bottom: 4px; }
-.kit-heat { border-collapse: separate; border-spacing: 3px; table-layout: fixed; font-size: 13px; }
+.kit-heat { width: max-content; border-collapse: separate; border-spacing: 3px; table-layout: fixed; font-size: 13px; }
 .kit-heat th, .kit-heat td { padding: 0; font-weight: 400; vertical-align: middle; }
 .kit-heat thead th { vertical-align: bottom; text-align: center; font-size: 11.5px; line-height: 1.25; color: #4b5563; padding: 0 2px 4px; }
 .kit-heat thead th .n, .kit-heat tbody th .n { display: block; overflow-wrap: break-word; }
