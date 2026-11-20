@@ -13,11 +13,16 @@ _DEFAULT = {
     "font": "Inter, system-ui, sans-serif",
     "size": 13.5, "size_s": 12.5, "size_xs": 11.5, "size_label": 12.5, "size_num": 13,
     "ink": "#1b1f24", "ink2": "#4b5563", "muted": "#6b7280", "line": "#d9dde3", "rule": "#eceef1", "mist": "#f4f5f7",
-    "blue": "#2458b3", "ramp_lo": (231, 236, 245), "ramp_hi": (143, 176, 230), "bar": "#8fb0e6", "hover": "#f4f7fc",
-    "selected": "#dde8f9",
-    # one colour per stage of procurement; the dropped and the late ones are muted on purpose
-    "status": {"Coming up": "#c77d00", "Planned date passed": "#d9b36f", "Under way": "#2458b3", "Completed": "#1f8a70",
-               "Dropped": "#9aa1ac", "No package linked": "#9aa1ac"},
+    "blue": "#2458b3", "hover": "#f4f7fc", "selected": "#dde8f9",
+    # the one blue ramp that says how much (map, heat map, bars): its first step is clearly apart from the
+    # no-data grey, its last a deep blue; numbers on the darker half are written in white
+    "ramp": ((185, 208, 239), (141, 179, 230), (90, 143, 214), (47, 104, 189), (19, 63, 140)), "ramp_light_text": 0.5,
+    "bar_t": 0.62,
+    # one colour per status of a procurement package, as the plan names it: still to come in warm colours, signed and
+    # under way in blues, done in green, cancelled or no longer in the plan muted
+    "status": {"Planned": "#c77d00", "Tendered": "#8a4fbf", "Contract signed": "#5f8fd8", "Under implementation": "#1f4a9e",
+               "Contract completed": "#1f8a70", "Cancelled": "#8d939c", "Not in latest plan": "#c2c7cf",
+               "No package linked": "#9aa1ac"},
     "investment": ("#e1f1ed", "#17695a"), "policy": ("#fbefd9", "#8a5a00"),
     "radius": 4, "radius_lg": 6, "row_h": 30,
 }
@@ -30,14 +35,23 @@ def look() -> dict:
     for k in ("ink", "mist", "line", "blue"):
         if p.get(k):
             out[k] = p[k]
+    out["bar"] = ramp(out["bar_t"], out)
     return out
 
 
-def ramp(t: float) -> str:
-    """The blue that says how much: 0 is the faintest wash, 1 the strongest that dark numbers still read on."""
-    L = look()
-    t = max(0.0, min(1.0, t)) ** 0.8
-    return "rgb(" + ",".join(str(round(a + (b - a) * t)) for a, b in zip(L["ramp_lo"], L["ramp_hi"])) + ")"
+def ramp(t: float, L: dict | None = None) -> str:
+    """The blue that says how much: 0 is the lightest step with data (clearly apart from the no-data grey), 1 a deep
+    blue. Every map, heat map and bar takes its colour from here."""
+    stops = (L or _DEFAULT)["ramp"]
+    t = max(0.0, min(1.0, float(t))) * (len(stops) - 1)
+    i = min(int(t), len(stops) - 2)
+    f = t - i
+    return "rgb(" + ",".join(str(round(a + (b - a) * f)) for a, b in zip(stops[i], stops[i + 1])) + ")"
+
+
+def ramp_ink(t: float) -> str:
+    """The colour a number is written in on ramp(t): dark on the light half, white on the dark half."""
+    return "#ffffff" if t > _DEFAULT["ramp_light_text"] else _DEFAULT["ink"]
 
 
 def css() -> str:

@@ -126,8 +126,8 @@ def heatmap(z, x, y, *, title: str | None = None, height: int | None = None, hov
                      for yy, row in zip(y, z)]
     fig = go.Figure(go.Heatmap(
         z=z, x=list(range(len(x))), y=list(range(len(y))), xgap=2, ygap=2, hoverongaps=False, showscale=False,
-        # The darkest cell stays light enough for dark numbers to read on it.
-        colorscale=[[0, p.get("mist", "#f4f5f7")], [1, "#8fb0e6"]],
+        # The one ramp of kit.look; numbers stay dark, so the scale stops at its middle.
+        colorscale=[[0, ramp(0)], [1, ramp(0.5)]],
         text=text, texttemplate="%{text}", textfont={"size": 12, "color": p.get("ink", "#1b1f24")},
         hovertext=hovertext, hovertemplate="%{hovertext}<extra></extra>"))
     fig.update_xaxes(side="top", tickangle=0, tickmode="array", tickvals=list(range(len(x))),
@@ -160,9 +160,10 @@ def world(iso2, values, names, *, title: str | None = None, height: int = 420, l
     fig = go.Figure(go.Choropleth(
         locations=[r[0] for r in rows], z=[r[1] for r in rows], text=[r[2] for r in rows],
         locationmode="ISO-3",
-        colorscale=[[0, ramp(0) if shaded else ramp(1)], [1, ramp(1)]],
+        colorscale=[[i / 4, ramp(i / 4)] for i in range(5)] if shaded else [[0, ramp(0.75)], [1, ramp(0.75)]],
         showscale=shaded, marker_line_color="#ffffff", marker_line_width=0.5,
-        colorbar={"thickness": 10, "len": 0.6, "outlinewidth": 0, "title": {"text": label, "side": "right"}},
+        colorbar={"thickness": 10, "len": 0.5, "outlinewidth": 0, "x": 0.0, "xanchor": "left", "y": 0.12, "yanchor": "bottom",
+                  "title": {"text": label, "side": "right", "font": {"size": 11.5}}, "tickfont": {"size": 11}},
         hovertext=[r[3] for r in rows], hovertemplate="%{hovertext}<extra></extra>"))
     L = look()
     fig.update_geos(projection_type="natural earth", showframe=False, showcoastlines=False,
