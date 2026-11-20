@@ -21,7 +21,8 @@ def _show(tag) -> None:
     sys.displayhook(tag)
 
 
-def page(title: str, *, subtitle: str | None = None, fillable: bool = False, navbar: str | None = None) -> None:
+def page(title: str, *, subtitle: str | None = None, fillable: bool = False, navbar: str | None = None,
+         brand=None, css: str | None = None, script: str | None = None) -> None:
     """Call once at the top of an Express app: title, theme, the dashboard
     background. Everything after it is the page.
 
@@ -29,14 +30,20 @@ def page(title: str, *, subtitle: str | None = None, fillable: bool = False, nav
     with the title and its tabs (top-level `with ui.nav_panel(...)` blocks;
     the id is the one ui.update_navs names), and a top-level right-hand
     `ui.sidebar` beside every view. The subtitle then belongs on the first
-    view, not in the bar."""
+    view, not in the bar.
+
+    brand: anything to set beside the title in the bar (the group being looked
+    at, a link); css / script: an app's own rules and script, added to the kit's."""
     from kit.cards import CSS
     from kit.clicks import JS
+    from kit.heat import CSS as HEAT
+    CSS = CSS + HEAT + (css or "")
+    JS = JS + (script or "")
     if navbar:
         ink = (brand().get("color") or {}).get("palette", {}).get("ink", "#1b1f24")
         # A navbar page takes only tabs at its top level: the style and the
         # click script go in its header.
-        xui.page_opts(title=title, window_title=title, theme=theme(), fillable=fillable, id=navbar,
+        xui.page_opts(title=cui.TagList(title, brand) if brand is not None else title, window_title=title, theme=theme(), fillable=fillable, id=navbar,
                       navbar_options=cui.navbar_options(bg=ink, theme="dark"),
                       header=cui.TagList(cui.tags.style(CSS), cui.tags.script(JS)))
         return

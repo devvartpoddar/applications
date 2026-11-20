@@ -11,6 +11,7 @@ dependencies = [
   "psycopg[binary]>=3.2",
   "pyyaml>=6",
   "pycountry>=24.6",
+  "openpyxl>=3.1",
   # An analysis repo plugs in as a path dependency: the app imports its
   # code from the box's checkout, never a copy (see [tool.uv.sources]).
   "wbg_portfolio",
