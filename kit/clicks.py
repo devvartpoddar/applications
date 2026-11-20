@@ -15,6 +15,10 @@ JS = """
     gd.__kitEv = gd._ev;
     gd.on('plotly_click', function (ev) {
       var p = ev.points && ev.points[0]; if (!p) return;
+      // a point that carries its own payload goes the way every other click goes: one input, one panel
+      if (p.customdata && typeof p.customdata === 'object' && !Array.isArray(p.customdata)) {
+        Shiny.setInputValue('card', p.customdata, {priority: 'event'}); return;
+      }
       Shiny.setInputValue(out.id + '_click', {x: p.x, y: p.y, customdata: p.customdata, text: p.text,
         location: p.location, point: p.pointNumber}, {priority: 'event'});
     });

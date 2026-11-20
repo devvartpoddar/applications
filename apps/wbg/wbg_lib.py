@@ -27,11 +27,11 @@ DOC_KIND = {"pad": "Appraisal document", "additional_financing": "Additional fin
 # How far above its threshold a sentence's probability is, shown as one to three bars and never as a number.
 STRENGTH = ((0.95, 3, "Well above the threshold"), (0.88, 2, "Above the threshold"), (0.0, 1, "Near the threshold"))
 # One colour per stage of procurement, wherever one is shown (the dropped one is muted on purpose).
-STAGE_COLOR = {"Completed": "#1f8a70", "Under way": "#2458b3", "Coming up": "#c77d00",
-               W.DROPPED: "#9aa1ac", "No package linked": "#9aa1ac"}
+_ST = kit.look()["status"]
+STAGE_COLOR = {**_ST, W.DROPPED: _ST["Dropped"]}
 STAGE_TAB = {"Coming up": "Coming up", "Under way": "Under way", "Completed": "Completed", W.DROPPED: "Dropped"}
 LATE = "Planned date passed"     # to come by the plan, but its planned date is behind us with no notice or signing recorded
-TAB_COLOR = {"Coming up": "#c77d00", LATE: "#d9b36f", "Under way": "#2458b3", "Completed": "#1f8a70", "Dropped": "#9aa1ac"}
+TAB_COLOR = _ST
 TABS = ("Coming up", LATE, "Under way", "Completed", "Dropped", "All")
 REGION_SHORT = {"Eastern and Southern Africa": "AFE", "Western and Central Africa": "AFW",
                 "East Asia and Pacific": "EAP", "Europe and Central Asia": "ECA",
@@ -241,9 +241,9 @@ def strength(p):
         return None
     level, label = next((lv, lb) for at, lv, lb in STRENGTH if p >= at)
     bars = [cui.span(style=f"display:inline-block;width:4px;height:{6 + 3 * i}px;margin-right:2px;border-radius:1px;"
-                           f"background:{'#2458b3' if i < level else '#d9dde3'}") for i in range(3)]
-    return cui.span(*bars, title=label, style="display:inline-flex;align-items:flex-end;margin-right:8px",
-                    **{"aria-label": label})
+                           f"background:{'var(--k-blue)' if i < level else 'var(--k-line)'}") for i in range(3)]
+    return cui.span(*bars, style="display:inline-flex;align-items:flex-end;margin-right:8px",
+                    **{"aria-label": label, "data-tip": label})
 
 
 def status_dot(stage, text=None):
@@ -278,7 +278,7 @@ def type_tags(r, limit=2):
     ts = r["types"]
     shown = [kit.tag(short_type(t), "outline", title="Type") for t in ts[:limit]]
     if len(ts) > limit:
-        shown.append(cui.span(f"+{len(ts) - limit}", class_="wbg-muted-s", title="; ".join(short_type(t) for t in ts[limit:])))
+        shown.append(cui.span(f"+{len(ts) - limit}", class_="wbg-muted-s", **{"data-tip": "; ".join(short_type(t) for t in ts[limit:])}))
     if not ts:
         shown = [cui.span("No type stated", class_="wbg-muted-s")]
     return shown
@@ -349,12 +349,12 @@ def proc_calendar(pk, key, sel_q, today):
         name = f"{q.year}Q{q.quarter}"
         mine = d[d["q"] == name].assign(o=lambda x: x["tab"].map(order)).sort_values(["o", "date"])
         sq = [cui.span(class_="sq", style=f"background:{TAB_COLOR[r.tab]}",
-                       title=f"{r.package_number or r.package_id} · {(r.description or '')[:70]} · {r.package_status}")
+                       **{"data-tip": f"{r.package_number or r.package_id} · {(r.description or '')[:70]}\n{r.package_status}"})
               for r in mine.itertuples()]
-        tip = f"{q.year} Q{q.quarter}: " + (", ".join(f"{int((mine['tab'] == t).sum())} {t.lower()}" for t in TABS[:-1]
+        tip = f"{q.year} Q{q.quarter}\n" + (", ".join(f"{int((mine['tab'] == t).sum())} {t.lower()}" for t in TABS[:-1]
                                                        if (mine["tab"] == t).any()) or "no packages")
         cols.append(cui.tags.button(*sq, {"type": "button", "class": "pc-q" + (" sel" if sel_q == name else "")
-                                          + (" y" if q.quarter == 1 else ""), "title": tip,
+                                          + (" y" if q.quarter == 1 else ""), "data-tip": tip,
                                           **clicker({"key": key, "q": name}, "pc")}))
     axis = []
     for q in qs:
@@ -382,7 +382,7 @@ SORTS = {"date": ("Date", ["date", "package_number"]), "country": ("Country", ["
 def proc_for(r, names):
     """What a package is for: the measures its strong links name, else the asset it shares with the activities."""
     if r["measure_names"]:
-        return cui.span(r["measure_names"], title=r["measure_names"])
+        return cui.span(r["measure_names"], **{"data-tip": r["measure_names"]})
     shared = [names.get(a, a) for a in split(r["shared_asset_ids"])] or split(r["asset_names"])
     return cui.span("Same asset: " + "; ".join(short_asset(x) for x in shared) if shared else "", class_="wbg-muted-s")
 
@@ -398,7 +398,7 @@ def proc_list(pk, key, tab, sort, desc, limit, sel_q, asset_names, *, tabs=True,
                                 t, cui.span(f"{counts[t]:,}", class_="c")) for t in TABS]
     if sel_q:
         y, q = sel_q.split("Q")
-        head.append(cui.tags.button({"type": "button", "class": "pc-qchip", "title": "Show every quarter",
+        head.append(cui.tags.button({"type": "button", "class": "pc-qchip", "data-tip": "Show every quarter",
                                      **clicker({"key": key, "q": sel_q}, "pc")}, f"{y} Q{q}  ×"))
     view = pk if tab == "All" else pk[pk["tab"] == tab]
     if sel_q:
@@ -465,65 +465,91 @@ def _dl(rows):
     return cui.tags.dl(*out, class_="wbg-dl")
 
 
-def package_sheet(parts, acts_cards, project_btn):
-    """Every field the reader has for a package, in groups, with its notices and awards, the link label in
-    small muted text, and the activities it serves."""
+STEPS = ("Planned", "Notice", "Signed", "Completed")
+
+
+def stage_strip(p):
+    """Where a package stands: Planned, Notice, Signed, Completed, with the date under each step that has happened
+    and the date planned for the next one."""
+    status = p["package_status"]
+    signed_on = status in ("Contract signed", "Under implementation", "Contract completed")
+    reached = [True, pd.notna(p["notice_date"]) or status == "Tendered" or signed_on, pd.notna(p["signed_date"]) or signed_on,
+               status == "Contract completed"]
+    dates = [p["planned_date"], p["notice_date"], p["signed_date"], pd.NaT]
+    nxt = next((i for i, r in enumerate(reached) if not r), None)
+    dropped = p["tab"] == "Dropped"
+    out = []
+    for i, name in enumerate(STEPS):
+        if reached[i]:
+            under = day(dates[i], "%d %b %Y") if pd.notna(dates[i]) else ""
+            cls = "done"
+        elif i == nxt and not dropped:
+            plan = p["next_date"] if pd.notna(p["next_date"]) else p["due_date"] if pd.notna(p["due_date"]) else dates[i]
+            under = ("planned " + day(plan, "%d %b %Y")) if pd.notna(plan) else ""
+            cls = "next"
+        else:
+            under, cls = "", "todo"
+        out.append(cui.div(cui.span(class_="dot"), cui.div(name, class_="nm"), cui.div(under, class_="dt"), class_="wbg-step " + cls))
+    return cui.div(*out, class_="wbg-steps")
+
+
+def package_sheet(parts, acts_cards, project_btn, names=None):
+    """A package at a glance: what it is, where it stands (a status line and a strip of the stages), the amount, who
+    has it, what it is for and the activities it serves. The rest of what the reader has is behind one 'More
+    details'."""
     p = parts["package"].iloc[0]
-    n = parts["notices"]
-    aw = parts["awards"]
-    link = {"strong": "Link to the activities: names this measure", "asset": "Link to the activities: for the same asset"}.get(p["link_strength"])
+    n, aw = parts["notices"], parts["awards"]
     fnum = lambda v: money(v) if pd.notna(v) else None  # noqa: E731
+    names = names or {}
+    estimate = [cui.span("Estimate ", class_="wbg-muted-s"), cui.span(fnum(p["estimated_amount_usd"]) or "not stated", class_="fw-semibold")]
+    if pd.notna(p["contract_amount_usd"]):
+        estimate += [cui.span("  ·  Contract ", class_="wbg-muted-s"), cui.span(fnum(p["contract_amount_usd"]), class_="fw-semibold")]
+    muted = " · ".join(x for x in [(p["category"] or "").replace("_", " ").capitalize(),
+                                   p["method_name"] or p["method_code"]] if x)
+    if p["measure_names"]:
+        for_ = cui.div(cui.span("For ", class_="wbg-muted-s"), cui.span(p["measure_names"]),
+                       cui.div("names this measure", class_="wbg-muted-s"))
+    else:
+        shared = [names.get(a, a) for a in split(p["shared_asset_ids"])] or split(p["asset_names"])
+        for_ = cui.div("for the same asset: " + "; ".join(short_asset(x) for x in shared), class_="wbg-muted-s") if shared else None
     comp = f"{p['component_number']} {p['component_name']}".strip() if isinstance(p["component_name"], str) or pd.notna(p["component_number"]) else None
-    sections = [
-        ("The package", [("Package number", p["package_number"]), ("Component", comp),
-                         ("Category", (p["category"] or "").replace("_", " ").capitalize() or None),
-                         ("Method", f"{p['method_name']} ({p['method_code']})" if p["method_name"] else p["method_code"]),
-                         ("Market approach", p["market_approach"]), ("Status", p["package_status"]),
-                         ("The plan's own status", p["plan_status"]),
-                         ("In the latest plan", None if pd.isna(p["in_latest_plan"]) else ("Yes" if p["in_latest_plan"] else "No"))]),
-        ("Amounts", [("Estimated", fnum(p["estimated_amount_usd"])), ("Actual", fnum(p["actual_amount_usd"])),
-                     ("Contract", fnum(p["contract_amount_usd"]))]),
-        ("Dates", [("Planned", day(p["planned_date"])), ("Revised", day(p["revised_date"])), ("Due", day(p["due_date"])),
-                   ("Notice", day(p["notice_date"])), ("Bid deadline", day(p["notice_deadline"])),
-                   ("Signed", day(p["signed_date"])), ("Next date to act on", day(p["next_date"]))]),
-        ("Supplier", [("Supplier", p["supplier"]), ("Supplier country", p["supplier_country"])]),
-        ("The plan", [("Plan document", p["plan_document_id"]), ("Plan published", day(p["plan_disclosure_date"]))]),
-    ]
-    out = [cui.div(status_dot(p["tab"], p["package_status"]), class_="mb-1"),
-           cui.p(p["description"] or "", class_="mb-1 fw-semibold"),
-           cui.p(cui.span(p["project_name"], " · ", p["place"]), project_btn, class_="mb-1 small"),
-           cui.p(link, class_="wbg-muted-s mb-3") if link else None]
-    for title, rows in sections:
-        out += [cui.div(title, class_="wbg-sub"), _dl(rows)]
-    out.append(cui.div(f"Notices ({len(n)})", class_="wbg-sub"))
-    if len(n):
-        out.append(cui.div(cui.tags.table(
-            cui.tags.thead(cui.tags.tr(*[cui.tags.th(h) for h in ("Published", "Type", "Status", "Deadline", "Description")])),
-            cui.tags.tbody(*[cui.tags.tr(cui.tags.td(day(r.publication_date)), cui.tags.td(r.notice_type or ""),
-                                         cui.tags.td(r.notice_status or ""), cui.tags.td(day(r.deadline_date)),
-                                         cui.tags.td(r.description or "")) for r in n.itertuples()]),
-            class_="wbg-table mini"), class_="wbg-scroll"))
-    else:
-        out.append(cui.p("None linked.", class_="wbg-muted-s"))
-    out.append(cui.div(f"Awards ({len(aw)})", class_="wbg-sub"))
-    if len(aw):
-        out.append(cui.div(cui.tags.table(
-            cui.tags.thead(cui.tags.tr(*[cui.tags.th(h) for h in ("Signed", "Supplier", "Country", "Amount", "Review")])),
-            cui.tags.tbody(*[cui.tags.tr(cui.tags.td(day(r.signed_date)), cui.tags.td(r.supplier_name or ""),
-                                         cui.tags.td(r.supplier_country or ""), cui.tags.td(fnum(r.total_amount_usd) or ""),
-                                         cui.tags.td(r.review_type or "")) for r in aw.itertuples()]),
-            class_="wbg-table mini"), class_="wbg-scroll"))
-    else:
-        out.append(cui.p("None linked.", class_="wbg-muted-s"))
-    out += [cui.div(f"Activities it serves ({len(acts_cards)})", class_="wbg-sub"),
-            *(acts_cards or [cui.p("None.", class_="wbg-muted-s")])]
-    return cui.div(*out)
+    more = [("Component", comp), ("Market approach", p["market_approach"]), ("The plan's own status", p["plan_status"]),
+            ("In the latest plan", None if pd.isna(p["in_latest_plan"]) else ("Yes" if p["in_latest_plan"] else "No")),
+            ("Planned", day(p["planned_date"])), ("Revised", day(p["revised_date"])), ("Due", day(p["due_date"])),
+            ("Notice", day(p["notice_date"])), ("Bid deadline", day(p["notice_deadline"])), ("Signed", day(p["signed_date"])),
+            ("Actual amount", fnum(p["actual_amount_usd"])), ("Plan document", p["plan_document_id"]),
+            ("Plan published", day(p["plan_disclosure_date"]))]
+    detail = [_dl(more), cui.div(f"Notices ({len(n)})", class_="wbg-sub")]
+    detail.append(cui.div(cui.tags.table(
+        cui.tags.thead(cui.tags.tr(*[cui.tags.th(h) for h in ("Published", "Type", "Status", "Deadline", "Description")])),
+        cui.tags.tbody(*[cui.tags.tr(cui.tags.td(day(r.publication_date)), cui.tags.td(r.notice_type or ""), cui.tags.td(r.notice_status or ""),
+                                     cui.tags.td(day(r.deadline_date)), cui.tags.td(r.description or "")) for r in n.itertuples()]),
+        class_="wbg-table mini"), class_="wbg-scroll") if len(n) else cui.p("None linked.", class_="wbg-muted-s"))
+    detail.append(cui.div(f"Awards ({len(aw)})", class_="wbg-sub"))
+    detail.append(cui.div(cui.tags.table(
+        cui.tags.thead(cui.tags.tr(*[cui.tags.th(h) for h in ("Signed", "Supplier", "Country", "Amount", "Review")])),
+        cui.tags.tbody(*[cui.tags.tr(cui.tags.td(day(r.signed_date)), cui.tags.td(r.supplier_name or ""), cui.tags.td(r.supplier_country or ""),
+                                     cui.tags.td(fnum(r.total_amount_usd) or ""), cui.tags.td(r.review_type or "")) for r in aw.itertuples()]),
+        class_="wbg-table mini"), class_="wbg-scroll") if len(aw) else cui.p("None linked.", class_="wbg-muted-s"))
+    supplier = cui.div(cui.span("Supplier ", class_="wbg-muted-s"), cui.span(p["supplier"]),
+                       cui.span(f" ({p['supplier_country']})", class_="wbg-muted-s") if p["supplier_country"] else None) if p["supplier"] else None
+    return cui.div(
+        cui.p(p["description"] or "", class_="mb-1 fw-semibold"),
+        cui.p(cui.span(p["project_name"], " · ", p["place"]), project_btn, class_="mb-2 small"),
+        cui.div(status_dot(p["tab"], p["package_status"]), class_="mb-1"),
+        stage_strip(p),
+        cui.div(*estimate, class_="mt-3"),
+        cui.div(muted, class_="wbg-muted-s"),
+        supplier, cui.div(for_, class_="mt-2") if for_ else None,
+        cui.tags.details(cui.tags.summary("More details"), cui.div(*detail), class_="wbg-moredetails"),
+        cui.div(f"Activities it serves ({len(acts_cards)})", class_="wbg-sub"),
+        *(acts_cards or [cui.p("None.", class_="wbg-muted-s")]))
 
 
 # ---------------------------------------------------------------- the app's own css and script
 
 CSS = """
-:root { --wbg-muted: #6b7280; --wbg-ink2: #4b5563; --wbg-line: #d9dde3; }
+:root { --wbg-muted: var(--k-muted); --wbg-ink2: var(--k-ink2); --wbg-line: var(--k-line); }
 .tab-pane:has(.wbg-notice) .card, .tab-pane:has(.wbg-notice) .wbg-filters, .tab-pane:has(.wbg-notice) > .d-flex, .tab-pane:has(.wbg-notice) .alert-light:not(.wbg-notice) { display: none; }
 .wbg-muted { color: var(--wbg-muted); }
 .wbg-muted-s { color: var(--wbg-muted); font-size: 12.5px; }
@@ -531,7 +557,9 @@ CSS = """
 /* the page before a group is chosen shows the start page and nothing of the app */
 a.nav-link[data-value="Start"], li:has(> a.nav-link[data-value="Start"]) { display: none !important; }
 .no-family .navbar-nav .nav-item, .no-family .wbg-top { display: none !important; }
-.navbar-brand { display: flex; align-items: baseline; gap: 14px; white-space: nowrap; margin-right: 18px; }
+.navbar .navbar-brand { font-size: 1.12rem; }
+.navbar .nav-link { padding-left: .6rem; padding-right: .6rem; }
+.navbar-brand { display: flex; align-items: baseline; gap: 10px; white-space: nowrap; margin-right: 8px; }
 .navbar .navbar-nav { flex-wrap: nowrap; align-items: center; }
 .no-family .sidebar-collapse-toggle, .no-family .collapse-toggle { display: none !important; }
 .wbg-fam { font-size: 14px; font-weight: 400; color: #c9d0da; display: inline-flex; align-items: baseline; gap: 8px; }
@@ -547,7 +575,7 @@ a.nav-link[data-value="Start"], li:has(> a.nav-link[data-value="Start"]) { displ
 .wbg-start h1 { font-size: 1.7rem; margin-bottom: 4px; }
 .wbg-start .lead { color: var(--wbg-ink2); font-size: 15px; margin-bottom: 22px; }
 .wbg-fgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; align-items: stretch; }
-.wbg-fcard { display: flex; flex-direction: column; background: var(--bs-body-bg, #fff); border: 1px solid var(--wbg-line); border-radius: 8px; padding: 22px 24px 20px; min-width: 0; }
+.wbg-fcard { display: flex; flex-direction: column; background: #fff; border: 1px solid var(--wbg-line); border-radius: 8px; padding: 22px 24px 20px; min-width: 0; }
 .wbg-fcard h2 { font-size: 1.3rem; margin: 0 0 6px; }
 .wbg-fcard .desc { color: var(--wbg-ink2); font-size: 14.5px; line-height: 1.4; min-height: 4.2em; margin: 0 0 14px; }
 .wbg-fcard .nums { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 12px 0; border-top: 1px solid var(--wbg-line); border-bottom: 1px solid var(--wbg-line); margin-bottom: 12px; }
@@ -561,7 +589,7 @@ a.nav-link[data-value="Start"], li:has(> a.nav-link[data-value="Start"]) { displ
 .wbg-fcard .btn { margin-top: auto; align-self: stretch; font-weight: 600; padding: 9px 14px; }
 /* figures */
 .wbg-figs { display: flex; flex-direction: column; height: 100%; }
-.wbg-fig { flex: 1; display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #eceef1; }
+.wbg-fig { flex: 1; display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--k-rule); }
 .wbg-fig:last-child { border-bottom: 0; }
 .wbg-fig .l { font-size: 14px; color: var(--wbg-ink2); }
 .wbg-fig .l small { display: block; font-size: 12px; color: var(--wbg-muted); }
@@ -572,11 +600,11 @@ a.nav-link[data-value="Start"], li:has(> a.nav-link[data-value="Start"]) { displ
 .wbg-scroll { overflow-x: auto; }
 .wbg-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .wbg-table th { text-align: left; font-size: 12px; font-weight: 600; color: var(--wbg-ink2); padding: 6px 10px 6px 0; border-bottom: 1px solid var(--wbg-line); white-space: nowrap; vertical-align: bottom; }
-.wbg-table td { padding: 8px 10px 8px 0; border-bottom: 1px solid #eceef1; vertical-align: top; }
+.wbg-table td { padding: 8px 10px 8px 0; border-bottom: 1px solid var(--k-rule); vertical-align: top; }
 .wbg-table td.r + td, .wbg-table th.r + th { padding-left: 16px; }
 .wbg-table th.r, .wbg-table td.r { text-align: right; font-variant-numeric: tabular-nums; }
 .wbg-table tr.go { cursor: pointer; }
-.wbg-table tr.go:hover td { background: #f4f7fc; }
+.wbg-table tr.go:hover td { background: var(--k-hover); }
 .wbg-table .clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.35; }
 .wbg-ctable { width: 100%; min-width: 900px; }
 .wbg-ctable td.pn { min-width: 260px; }
@@ -586,8 +614,8 @@ a.nav-link[data-value="Start"], li:has(> a.nav-link[data-value="Start"]) { displ
 .wbg-table.mini { font-size: 12.5px; }
 .wbg-table.mini td, .wbg-table.mini th { padding: 4px 8px 4px 0; }
 .wbg-chip { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 99px; white-space: nowrap; }
-.wbg-chip.inv { background: #e1f1ed; color: #17695a; }
-.wbg-chip.pol { background: #fbefd9; color: #8a5a00; }
+.wbg-chip.inv { background: var(--k-inv-bg); color: var(--k-inv); }
+.wbg-chip.pol { background: var(--k-pol-bg); color: var(--k-pol); }
 /* procurement */
 .pc-legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; margin-bottom: 8px; }
 .pc-legend .sq, .pc-cols .sq { display: inline-block; width: 9px; height: 9px; border-radius: 2px; }
@@ -597,36 +625,36 @@ a.nav-link[data-value="Start"], li:has(> a.nav-link[data-value="Start"]) { displ
 .pc-cols { position: relative; display: flex; align-items: stretch; border-bottom: 1px solid var(--wbg-line); }
 .pc-q { flex: 1 1 0; min-width: 0; display: flex; flex-wrap: wrap-reverse; align-content: flex-start; gap: 2px; padding: 0 3px 2px; background: none; border: 0; border-radius: 3px; cursor: pointer; }
 .pc-q:hover { background: #eef3fb; }
-.pc-q.sel { background: #dde8f9; box-shadow: inset 0 0 0 1px #2458b3; }
-.pc-q.y { border-left: 1px solid #e3e6eb; }
-.pc-today { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1.5px dashed #4b5563; pointer-events: none; }
-.pc-today span { position: absolute; top: -1px; left: 4px; font-size: 11px; color: #4b5563; background: #fff; padding: 0 2px; }
+.pc-q.sel { background: var(--k-selected); box-shadow: inset 0 0 0 1px var(--k-blue); }
+.pc-q.y { border-left: 1px solid var(--k-rule); }
+.pc-today { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1.5px dashed var(--k-ink2); pointer-events: none; }
+.pc-today span { position: absolute; top: -1px; left: 4px; font-size: 11px; color: var(--k-ink2); background: #fff; padding: 0 2px; }
 .pc-axis { display: flex; margin-top: 3px; }
 .pc-ax { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; font-size: 10px; color: var(--wbg-muted); padding-left: 3px; height: 28px; }
-.pc-ax.y { border-left: 1px solid #e3e6eb; }
+.pc-ax.y { border-left: 1px solid var(--k-rule); }
 .pc-ax .yr { font-size: 11.5px; font-weight: 600; color: var(--wbg-ink2); white-space: nowrap; }
 .pc-tabs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 14px 0 8px; }
-.pc-tab { border: 1px solid var(--wbg-line); background: var(--bs-body-bg, #fff); border-radius: 99px; padding: 3px 12px; font-size: 13px; cursor: pointer; display: inline-flex; gap: 7px; }
+.pc-tab { border: 1px solid var(--wbg-line); background: #fff; border-radius: 99px; padding: 3px 12px; font-size: 13px; cursor: pointer; display: inline-flex; gap: 7px; }
 .pc-tab .c { color: var(--wbg-muted); font-variant-numeric: tabular-nums; }
-.pc-tab.on { background: #1b1f24; border-color: #1b1f24; color: #fff; }
+.pc-tab.on { background: var(--k-ink); border-color: var(--k-ink); color: #fff; }
 .pc-tab.on .c { color: #c9d0da; }
-.pc-qchip { border: 1px solid #2458b3; background: #dde8f9; color: #1a4287; border-radius: 99px; padding: 3px 12px; font-size: 13px; cursor: pointer; }
+.pc-qchip { border: 1px solid var(--k-blue); background: var(--k-selected); color: #1a4287; border-radius: 99px; padding: 3px 12px; font-size: 13px; cursor: pointer; }
 .pc-table { table-layout: fixed; min-width: 1240px; }
 .pc-table .w-date { width: 104px; } .pc-table .w-pkg { width: 100px; } .pc-table .w-proj { width: 190px; } .pc-table .w-ctry { width: 110px; }
 .pc-table .w-cat { width: 96px; } .pc-table .w-meth { width: 120px; } .pc-table .w-amt { width: 112px; } .pc-table .w-for { width: 180px; }
 .pc-table td.w-pkg { overflow-wrap: anywhere; font-size: 12.5px; }
 .pc-table .srt { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; }
-.pc-table .srt:hover, .pc-table .srt.on { color: var(--bs-primary, #2458b3); }
+.pc-table .srt:hover, .pc-table .srt.on { color: var(--bs-primary, var(--k-blue)); }
 .pc-table .srt .ar { display: inline-block; width: 12px; }
 /* side panel */
 .wbg-ph { margin-bottom: 10px; }
 .wbg-ph h5 { margin: 0 0 4px; font-size: 1.08rem; line-height: 1.3; }
 .wbg-ph .tot { font-size: 13px; color: var(--wbg-ink2); }
-.wbg-seg { display: inline-flex; border: 1px solid var(--wbg-line); border-radius: 6px; overflow: hidden; background: var(--bs-body-bg, #fff); }
+.wbg-seg { display: inline-flex; border: 1px solid var(--wbg-line); border-radius: 6px; overflow: hidden; background: #fff; }
 .wbg-seg button { border: 0; background: none; padding: 4px 12px; font-size: 13px; cursor: pointer; border-right: 1px solid var(--wbg-line); display: inline-flex; gap: 6px; align-items: baseline; }
 .wbg-seg button:last-child { border-right: 0; }
 .wbg-seg button .c { color: var(--wbg-muted); font-variant-numeric: tabular-nums; font-size: 12px; }
-.wbg-seg button.on { background: #1b1f24; color: #fff; }
+.wbg-seg button.on { background: var(--k-ink); color: #fff; }
 .wbg-seg button.on .c { color: #c9d0da; }
 .wbg-bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0 12px; }
 .wbg-pgroup { margin-top: 14px; }
@@ -634,7 +662,7 @@ a.nav-link[data-value="Start"], li:has(> a.nav-link[data-value="Start"]) { displ
 .wbg-pgroup > header .t { font-weight: 600; font-size: 14.5px; }
 .wbg-pgroup > header .s { font-size: 12.5px; color: var(--wbg-muted); }
 .wbg-pgroup > header .btn { font-size: 12.5px; padding: 0; white-space: nowrap; }
-.wbg-act { border: 1px solid var(--wbg-line); border-radius: 6px; margin-bottom: 8px; background: var(--bs-body-bg, #fff); }
+.wbg-act { border: 1px solid var(--wbg-line); border-radius: 6px; margin-bottom: 8px; background: #fff; }
 .wbg-act > summary { list-style: none; cursor: pointer; padding: 8px 10px 8px 26px; position: relative; display: flex; flex-direction: column; gap: 4px; }
 .wbg-act > summary::-webkit-details-marker { display: none; }
 .wbg-act > summary::before { content: "▸"; position: absolute; left: 10px; top: 8px; color: var(--wbg-ink2); }
@@ -647,23 +675,34 @@ a.nav-link[data-value="Start"], li:has(> a.nav-link[data-value="Start"]) { displ
 .wbg-act .tags .kit-tag { margin: 0; }
 .wbg-act .inner { padding: 8px 12px 10px; }
 .wbg-sentence .kit-quote { margin: 4px 0 8px; }
-.wbg-pkgline { display: grid; grid-template-columns: 112px 84px 92px 1fr; gap: 8px; align-items: start; width: 100%; text-align: left; background: none; border: 0; border-top: 1px solid #eceef1; padding: 5px 0; font-size: 12.5px; cursor: pointer; color: inherit; }
-.wbg-pkgline:hover { background: #f4f7fc; }
+.wbg-pkgline { display: grid; grid-template-columns: 112px 84px 92px 1fr; gap: 8px; align-items: start; width: 100%; text-align: left; background: none; border: 0; border-top: 1px solid var(--k-rule); padding: 5px 0; font-size: 12.5px; cursor: pointer; color: inherit; }
+.wbg-pkgline:hover { background: var(--k-hover); }
 .wbg-pkgline .x { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--wbg-ink2); line-height: 1.35; }
 .wbg-pkgline .n { color: var(--wbg-ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wbg-steps { display: grid; grid-template-columns: repeat(4, 1fr); margin: 6px 0 0; }
+.wbg-step { position: relative; text-align: center; padding-top: 18px; font-size: 12px; }
+.wbg-step::before { content: ""; position: absolute; top: 5px; left: -50%; right: 50%; height: 2px; background: var(--k-line); }
+.wbg-step:first-child::before { display: none; }
+.wbg-step .dot { position: absolute; top: 0; left: calc(50% - 6px); width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--k-line); background: #fff; }
+.wbg-step.done .dot { background: var(--k-st-completed); border-color: var(--k-st-completed); }
+.wbg-step.done::before { background: var(--k-st-completed); }
+.wbg-step.next .dot { border-color: var(--k-st-coming-up); }
+.wbg-step .nm { font-weight: 600; } .wbg-step.todo .nm, .wbg-step.todo { color: var(--k-muted); } .wbg-step .dt { color: var(--k-muted); min-height: 1.3em; }
+.wbg-moredetails { margin-top: 14px; border-top: 1px solid var(--k-line); padding-top: 8px; }
+.wbg-moredetails > summary { cursor: pointer; color: var(--k-blue); font-size: 13.5px; font-weight: 500; }
 .wbg-dl { display: grid; grid-template-columns: 150px 1fr; gap: 3px 12px; margin: 0; font-size: 13.5px; }
 .wbg-dl dt { font-weight: 400; color: var(--wbg-muted); }
 .wbg-dl dd { margin: 0; overflow-wrap: anywhere; }
 /* lists of types, activities */
-.wbg-types .wbg-trow { display: grid; grid-template-columns: 1fr 96px 80px; gap: 14px; padding: 10px 6px; border-bottom: 1px solid #eceef1; cursor: pointer; align-items: baseline; }
-.wbg-types .wbg-trow:hover { background: #f4f7fc; }
+.wbg-types .wbg-trow { display: grid; grid-template-columns: 1fr 96px 80px; gap: 14px; padding: 10px 6px; border-bottom: 1px solid var(--k-rule); cursor: pointer; align-items: baseline; }
+.wbg-types .wbg-trow:hover { background: var(--k-hover); }
 .wbg-types .wbg-trow.head { cursor: default; padding: 4px 6px; font-size: 12px; font-weight: 600; color: var(--wbg-ink2); border-bottom: 1px solid var(--wbg-line); }
 .wbg-types .wbg-trow.head:hover { background: none; }
-.wbg-types .nm { font-weight: 600; color: var(--bs-primary, #2458b3); }
+.wbg-types .nm { font-weight: 600; color: var(--bs-primary, var(--k-blue)); }
 .wbg-types .df { font-size: 13px; color: var(--wbg-ink2); margin-top: 2px; max-width: 95ch; }
 .wbg-types .sg { font-size: 12.5px; color: var(--wbg-muted); margin-top: 2px; }
 .wbg-types .num { text-align: right; font-variant-numeric: tabular-nums; }
-.wbg-grp { border: 1px solid var(--wbg-line); border-radius: 6px; margin-bottom: 8px; background: var(--bs-body-bg, #fff); }
+.wbg-grp { border: 1px solid var(--wbg-line); border-radius: 6px; margin-bottom: 8px; background: #fff; }
 .wbg-grp > summary { cursor: pointer; padding: 8px 12px; list-style: none; display: flex; gap: 10px; align-items: baseline; }
 .wbg-grp > summary::-webkit-details-marker { display: none; }
 .wbg-grp > summary::before { content: "▸"; color: var(--wbg-ink2); }
@@ -683,7 +722,7 @@ a.nav-link[data-value="Start"], li:has(> a.nav-link[data-value="Start"]) { displ
 .wbg-filters .shiny-input-container { margin: 0; }
 .wbg-filters label { font-size: 12px; font-weight: 600; color: var(--wbg-ink2); margin-bottom: 2px; }
 .wbg-def { max-width: 80ch; line-height: 1.45; }
-.wbg-more > summary { display: inline; color: var(--bs-primary, #2458b3); cursor: pointer; margin-left: 4px; list-style: none; font-weight: 500; }
+.wbg-more > summary { display: inline; color: var(--bs-primary, var(--k-blue)); cursor: pointer; margin-left: 4px; list-style: none; font-weight: 500; }
 .wbg-more > summary::-webkit-details-marker { display: none; }
 .wbg-more[open] > summary { display: none; }
 .wbg-more { display: inline; }
@@ -691,7 +730,7 @@ a.nav-link[data-value="Start"], li:has(> a.nav-link[data-value="Start"]) { displ
 /* download */
 .dl-levels .shiny-options-group { display: flex; flex-direction: column; gap: 8px; }
 .dl-levels .radio, .dl-levels .form-check { margin: 0; padding: 8px 12px; border: 1px solid var(--wbg-line); border-radius: 6px; }
-.dl-levels .radio:has(input:checked), .dl-levels .form-check:has(input:checked) { border-color: #2458b3; background: #f4f7fc; }
+.dl-levels .radio:has(input:checked), .dl-levels .form-check:has(input:checked) { border-color: var(--k-blue); background: var(--k-hover); }
 .dl-levels label { width: 100%; margin: 0; display: flex; align-items: flex-start; gap: 12px; cursor: pointer; }
 .dl-levels label input { position: static; margin: 3px 0 0; flex: none; }
 .dl-levels label > span { display: block; padding: 0; }
@@ -703,7 +742,7 @@ a.nav-link[data-value="Start"], li:has(> a.nav-link[data-value="Start"]) { displ
 .dl-prev { overflow: auto; max-height: 300px; border: 1px solid var(--wbg-line); border-radius: 6px; }
 .dl-prev table { border-collapse: collapse; font-size: 12.5px; white-space: nowrap; }
 .dl-prev th { position: sticky; top: 0; background: #f4f5f7; text-align: left; padding: 5px 10px; border-bottom: 1px solid var(--wbg-line); font-weight: 600; }
-.dl-prev td { padding: 4px 10px; border-bottom: 1px solid #eceef1; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.dl-prev td { padding: 4px 10px; border-bottom: 1px solid var(--k-rule); max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
 .modal-xl-wbg .modal-dialog { max-width: 1040px; }
 @media (max-width: 576px) { .navbar-brand { flex-wrap: wrap; white-space: normal; gap: 0 10px; } .navbar .wbg-top { flex-wrap: wrap; padding: 8px 0; } .wbg-fgrid { grid-template-columns: 1fr; } .wbg-dl { grid-template-columns: 1fr; } .wbg-dl dt { margin-top: 6px; } .wbg-pkgline { grid-template-columns: 1fr; gap: 0; } }
 """

@@ -62,7 +62,7 @@ def tag(text: str, kind: str = "plain", *, title: str | None = None):
     'tint' (blue wash), 'outline' (white with a border) or 'plain' (grey).
     Give each kind of thing on a page one form, so they can be told apart
     without reading."""
-    return ui.span(text, class_=f"kit-tag kit-tag-{kind if kind in TAG_KINDS else 'plain'}", title=title)
+    return ui.span(text, class_=f"kit-tag kit-tag-{kind if kind in TAG_KINDS else 'plain'}", **({"data-tip": title} if title else {}))
 
 
 def dot(text: str, color: str | None = None, *, hollow: bool = False):

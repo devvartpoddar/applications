@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import plotly.graph_objects as go
 
+from kit.look import look, ramp
 from kit.theme import brand, palette
 
-_FONT = "Inter, system-ui, sans-serif"
+_FONT = "Inter, system-ui, sans-serif"   # kit.look.LOOK["font"]
 
 
 def figure(fig: go.Figure, *, title: str | None = None, height: int = 360) -> go.Figure:
@@ -24,7 +25,8 @@ def figure(fig: go.Figure, *, title: str | None = None, height: int = 360) -> go
         showlegend=len(fig.data) > 1,
         legend={"orientation": "h", "y": -0.15},
         colorway=[p.get(k) for k in ("blue", "teal", "amber", "red", "grey") if p.get(k)] or None,
-        hoverlabel={"font": {"family": _FONT}},
+        hoverlabel={"bgcolor": look()["ink"], "bordercolor": look()["ink"], "align": "left",
+                    "font": {"family": look()["font"], "size": 12.5, "color": "#ffffff"}},
     )
     fig.update_xaxes(showgrid=False, zeroline=False, linecolor=p.get("line", "#d9dde3"))
     fig.update_yaxes(gridcolor=p.get("line", "#d9dde3"), zeroline=False)
@@ -158,13 +160,14 @@ def world(iso2, values, names, *, title: str | None = None, height: int = 420, l
     fig = go.Figure(go.Choropleth(
         locations=[r[0] for r in rows], z=[r[1] for r in rows], text=[r[2] for r in rows],
         locationmode="ISO-3",
-        colorscale=[[0, p.get("mist", "#f4f5f7") if shaded else p.get("blue", "#2458b3")], [1, p.get("blue", "#2458b3")]],
-        showscale=shaded, marker_line_color=p.get("paper", "#ffffff"), marker_line_width=0.5,
+        colorscale=[[0, ramp(0) if shaded else ramp(1)], [1, ramp(1)]],
+        showscale=shaded, marker_line_color="#ffffff", marker_line_width=0.5,
         colorbar={"thickness": 10, "len": 0.6, "outlinewidth": 0, "title": {"text": label, "side": "right"}},
         hovertext=[r[3] for r in rows], hovertemplate="%{hovertext}<extra></extra>"))
+    L = look()
     fig.update_geos(projection_type="natural earth", showframe=False, showcoastlines=False,
-                    showcountries=True, countrycolor=p.get("line", "#d9dde3"), showland=True,
-                    landcolor=p.get("mist", "#f4f5f7"), bgcolor="rgba(0,0,0,0)", lataxis_range=[-50, 75])
+                    showcountries=True, countrycolor=L["line"], showland=True,
+                    landcolor=L["mist"], bgcolor="rgba(0,0,0,0)", lataxis_range=[-50, 75])
     fig = figure(fig, title=title, height=height)
     fig.update_layout(margin={"l": 0, "r": 0, "t": 40 if title else 0, "b": 0})
     return fig

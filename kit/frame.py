@@ -36,9 +36,11 @@ def page(title: str, *, subtitle: str | None = None, fillable: bool = False, nav
     at, a link); css / script: an app's own rules and script, added to the kit's."""
     from kit.cards import CSS
     from kit.clicks import JS
+    from kit.bars import CSS as BARS
     from kit.heat import CSS as HEAT
-    CSS = CSS + HEAT + (css or "")
-    JS = JS + (script or "")
+    from kit.look import css as look_css, js as look_js
+    CSS = look_css() + CSS + HEAT + BARS + (css or "")
+    JS = JS + look_js() + (script or "")
     if navbar:
         ink = (brand().get("color") or {}).get("palette", {}).get("ink", "#1b1f24")
         # A navbar page takes only tabs at its top level: the style and the

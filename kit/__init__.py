@@ -12,10 +12,12 @@ from kit.cache import cached
 from kit.cards import board, card, cards, dot, fold, quote, tag
 from kit.clicks import on_click
 from kit.charts import bar, empty, figure, heatmap, line, world, wrap
+from kit.bars import bar_rows
 from kit.heat import heat_table
+from kit.look import look, ramp
 from kit.db import query, query_df
 from kit.frame import page, section, tile
 from kit.theme import brand, theme
 
-__all__ = ["bar", "board", "brand", "cached", "card", "cards", "dot", "empty", "figure", "fold", "heat_table", "heatmap", "line", "on_click",
+__all__ = ["bar", "bar_rows", "look", "ramp", "board", "brand", "cached", "card", "cards", "dot", "empty", "figure", "fold", "heat_table", "heatmap", "line", "on_click",
            "page", "query", "query_df", "quote", "section", "tag", "theme", "tile", "world", "wrap"]
