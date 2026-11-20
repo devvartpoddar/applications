@@ -19,6 +19,7 @@ from pathlib import Path
 from urllib.parse import parse_qs
 
 import pandas as pd
+import psycopg
 from shiny import reactive, render, req
 from shiny import ui as cui
 from shiny.express import input, session, ui
@@ -61,9 +62,17 @@ def family_name(f):
     return FAMILIES[f][0] if f in FAMILIES else str(f).replace("_", " ").capitalize()
 
 
+FAMILY_COLUMNS = ["family", "label_set", "measure_name", "definition", "measure_projects", "measure_activities",
+                  "family_projects", "family_activities", "family_measures"]
+
+
 @reactive.calc
 def fam_table():
-    return kit.cached(("wbg", "families"), lambda: W.families(q))
+    """The families and their measures; an empty table when the database holds no tables of the new shape yet."""
+    try:
+        return kit.cached(("wbg", "families"), lambda: W.families(q))
+    except psycopg.Error:
+        return pd.DataFrame(columns=FAMILY_COLUMNS)
 
 
 @reactive.calc
@@ -80,7 +89,10 @@ def chosen():
 
 @reactive.calc
 def asset_df():
-    return kit.cached(("wbg", "asset_types"), lambda: W.asset_types(q))
+    def load():
+        a = W.asset_types(q)
+        return a.assign(subtype_name=a["subtype_name"].map(L.no_kind), subtype_definition=a["subtype_definition"].map(L.no_kind))
+    return kit.cached(("wbg", "asset_types"), load)
 
 
 @reactive.calc
@@ -105,18 +117,73 @@ def measure_df():
     return kit.cached(("wbg", "measures"), lambda: W.measures(q))
 
 
-@reactive.calc
-def pkgs():
-    f = chosen()
-    req(f)
+def load_pkgs(f):
     return kit.cached(("wbg", "pkgs", f), lambda: L.prep_pkgs(W.packages_detail(q, f)))
 
 
 @reactive.calc
-def acts():
+def pkgs():
     f = chosen()
     req(f)
-    return kit.cached(("wbg", "acts", f), lambda: L.link_procurement(L.prep_acts(W.activities(q, f)), pkgs()))
+    try:
+        return load_pkgs(f)
+    except psycopg.Error:
+        req(False)
+
+
+@reactive.calc
+def acts_raw():
+    """The family's activities; None when the database does not hold the new data yet."""
+    f = chosen()
+    req(f)
+    try:
+        return kit.cached(("wbg", "acts", f), lambda: L.link_procurement(L.prep_acts(W.activities(q, f)), load_pkgs(f)))
+    except psycopg.Error:
+        return None
+
+
+@reactive.calc
+def acts():
+    """The family's activities; a page with none shows its notice, and nothing else draws."""
+    df = acts_raw()
+    req(df is not None and len(df))
+    return df
+
+
+def notice(what="page"):
+    """What a page says when there is nothing to show: the new data is not published, or the family has none."""
+    if not len(families()):
+        return cui.div("The new data is not published yet. This dashboard reads the activities, sentences and procurement "
+                       "of the redesigned pipeline, which is not in the database yet.", class_="alert alert-light border my-3 wbg-notice")
+    df = acts_raw()
+    if df is None:
+        return cui.div("The new data is not published yet. The database holds no activities for this dashboard.",
+                       class_="alert alert-light border my-3 wbg-notice")
+    if df.empty:
+        return cui.div(f"There are no activities for {family_name(chosen()).lower()} yet, so this {what} has nothing to show.",
+                       class_="alert alert-light border my-3 wbg-notice")
+    return None
+
+
+@reactive.calc
+def measure_ids():
+    """{measure id: its name}, of every measure the store has, for turning an id in a definition into words."""
+    try:
+        m = kit.cached(("wbg", "measures"), lambda: W.measures(q))
+    except psycopg.Error:
+        return {}
+    return dict(zip(m["label_set"], m["measure_name"]))
+
+
+def plain(text):
+    """A definition for people: a measure's id written in it (backup_power, cra) becomes that measure's name, and
+    the word kind becomes type."""
+    if not isinstance(text, str) or not text:
+        return text
+    for mid, name in sorted(measure_ids().items(), key=lambda kv: -len(kv[0])):
+        word = name if name[1:2].isupper() else name[:1].lower() + name[1:]
+        text = re.sub(rf"(?<![\w]){re.escape(mid)}(?![\w])", word, text)
+    return L.no_kind(text)
 
 
 @reactive.calc
@@ -354,6 +421,8 @@ with ui.nav_panel(START):
     @render.ui
     def start():
         ft = fam_table()
+        if not len(families()):
+            return cui.div(cui.tags.h1("What are you working on?"), notice(), class_="wbg-start")
         cards = []
         for f in families():
             m = ft[ft["family"] == f]
@@ -444,7 +513,7 @@ def facts(name, kind, df, definition=None, note=None, *, of=None, of_what="proje
         line.append(L.plural(df["label_set"].nunique(), "measure"))
     return cui.card(cui.card_body(
         cui.span(kind, class_="small", style="color:#4b5563"), cui.h3(name, class_="h4 mb-2"),
-        cui.p(definition, style="max-width: 80ch") if definition else None,
+        cui.div(L.definition_block(plain(definition)), class_="mb-3") if definition else None,
         cui.p(" · ".join(line), class_="wbg-facts"),
         cui.p(note, class_="small mb-0", style="color:#4b5563") if note else None))
 
@@ -455,8 +524,8 @@ def type_list(items, *, head="Type"):
     rows = [cui.div(cui.span(head), cui.span("Activities", class_="num"), cui.span("Projects", class_="num"), class_="wbg-trow head")]
     for it in items:
         rows.append(cui.tags.div(
-            cui.div(cui.div(it["name"], class_="nm"),
-                    cui.div(it["definition"], class_="df") if it.get("definition") else None,
+            cui.div(cui.div(it["name"], class_="nm", title=L.short_def(plain(it.get("definition") or ""))[0] or None),
+                    cui.div(L.definition_block(plain(it["definition"])), class_="df") if it.get("definition") else None,
                     cui.div("suggested, not yet an agreed type", class_="sg") if it.get("proposed") else None),
             cui.span(f"{it['acts']:,}", class_="num"), cui.span(f"{it['projects']:,}", class_="num"),
             {"class": "wbg-trow", **L.clicker({"title": it["title"], "where": it["where"]})}))
@@ -468,7 +537,12 @@ def type_list(items, *, head="Type"):
 def pstate_of(key):
     """What the component keeps: the quarter picked, its status tab, the sort the reader chose (none: by date, or
     by country on the Completed tab, which is how to see who has already done something), the rows shown."""
-    return {"q": None, "tab": "Coming up", "sort": None, "desc": False, "limit": 50, **pstate.get().get(key, {})}
+    return {"q": None, "tab": "Coming up", "sort": None, "desc": False, "limit": 25 if key == "pg" else 8, "page": 0,
+            **pstate.get().get(key, {})}
+
+
+def pstate_default(key):
+    return 25 if key == "pg" else 8
 
 
 def eff(key):
@@ -486,13 +560,17 @@ def _pc():
     s, _, sort = eff(key)
     cur = dict(st.get(key, {}))
     if "q" in c:
-        cur.update(q=None if s["q"] == c["q"] else c["q"], limit=50)
+        cur.update(q=None if s["q"] == c["q"] else c["q"], limit=pstate_default(key), page=0)
     if "tab" in c:
-        cur.update(tab=c["tab"], sort=None, desc=False, limit=50)
+        cur.update(tab=c["tab"], sort=None, desc=False, limit=pstate_default(key), page=0)
     if "sort" in c:
         cur.update(desc=not s["desc"]) if sort == c["sort"] else cur.update(sort=c["sort"], desc=False)
     if c.get("more"):
-        cur["limit"] = s["limit"] + 100
+        cur["limit"] = 10 ** 6
+    if c.get("fewer"):
+        cur["limit"] = pstate_default(key)
+    if "page" in c:
+        cur["page"] = max(0, int(c["page"]))
     st[key] = cur
     pstate.set(st)
 
@@ -512,7 +590,7 @@ def proc_section(key, scope, *, tabs=True, hide=(), tab=None):
         if scope().empty:
             return None
         return L.proc_list(scope(), key, tab() if tab else t, sort, s["desc"], s["limit"], s["q"], asset_names(),
-                           tabs=tabs, hide=hide)
+                           tabs=tabs, hide=hide, page=s["page"] if key == "pg" else None)
 
     calendar.__name__, listing.__name__ = f"{key}_pcal", f"{key}_plist"
     return cui.TagList(render.ui(calendar), render.ui(listing))
@@ -609,6 +687,7 @@ def package_panel(package_id):
     parts = kit.cached(("wbg", "package", package_id), lambda: W.package(q, package_id), seconds=300)
     if parts["package"].empty:
         return cui.p("This package is not in the data.")
+    parts = {**parts, "package": L.prep_pkgs(parts["package"])}
     p = parts["package"].iloc[0]
     a = L.link_procurement(L.prep_acts(parts["activities"]), pd.DataFrame(columns=pkgs().columns))
     cards = activity_cards(a, pkgs().iloc[0:0], first_open=True, show_project=False) if len(a) else []
@@ -637,9 +716,15 @@ def not_digital_panel(project_id):
 with ui.nav_panel("Overview"):
 
     @render.ui
+    def ov_notice():
+        return notice("page")
+
+    @render.ui
     def ov_intro():
         f = chosen()
         req(f)
+        if notice():
+            return None
         return cui.p(f"What World Bank project documents commit to do for digital assets under {family_name(f).lower()}, and the "
                      "procurement linked to it. An activity is one thing a project commits to do for a measure, grouped from the "
                      "sentences that say so: what a document says the project will or may do, not delivery. Click any bar, cell, "
@@ -786,6 +871,10 @@ def lens_base(lens=None, value=None):
 
 with ui.nav_panel("Explore"):
 
+    @render.ui
+    def ex_notice():
+        return notice("page")
+
     with ui.div(class_="d-flex flex-wrap gap-3 align-items-end my-3"):
         ui.input_radio_buttons("lens", "View by", LENSES, selected="country", inline=True)
         ui.input_selectize("pick", None, choices=[], width="460px")
@@ -829,7 +918,7 @@ with ui.nav_panel("Explore"):
                 for r in pf.itertuples():
                     nxt = L.day(r.next_package_date) if pd.notna(r.next_package_date) else "—"
                     rows.append(cui.tags.tr(
-                        cui.tags.td(cui.span(r.project_name), cui.span(r.project_id, class_="id")),
+                        cui.tags.td(cui.span(r.project_name), cui.span(r.project_id, class_="id"), class_="pn"),
                         cui.tags.td(r.practice or "—"),
                         cui.tags.td(L.money(r.commitment_usd_millions * 1e6) if pd.notna(r.commitment_usd_millions) else "—", class_="r"),
                         cui.tags.td(f"FY{int(r.approval_fiscal_year)}" if pd.notna(r.approval_fiscal_year) else "—"),
@@ -840,9 +929,8 @@ with ui.nav_panel("Explore"):
                 heads = [("Project", ""), ("Practice", ""), ("Amount", "r"), ("Approved", ""), ("Closes", ""), ("Measures", "r"),
                          ("Activities", "r"), ("Next procurement", "")]
                 return cui.div(cui.tags.table(
-                    cui.tags.colgroup(*[cui.tags.col(style=f"width:{w}") for w in ("30%", "15%", "12%", "9%", "11%", "7%", "8%", "9%")]),
                     cui.tags.thead(cui.tags.tr(*[cui.tags.th(h, class_=c) for h, c in heads])), cui.tags.tbody(*rows),
-                    class_="wbg-table", style="table-layout:fixed;min-width:860px"), class_="wbg-scroll")
+                    class_="wbg-table wbg-ctable"), class_="wbg-scroll")
 
         with ui.card():
             ui.card_header("Who commits to what")
@@ -1045,7 +1133,7 @@ with ui.nav_panel("Explore"):
                                   "where": {"asset": name, "asset_type": r.subtype_name}})
                 return type_list(items, head="Asset type")
 
-        with ui.layout_columns(col_widths=[6, 6]):
+        with ui.layout_columns(col_widths=[5, 7]):
             with ui.card():
                 ui.card_header("Measures committed for it")
 
@@ -1139,7 +1227,7 @@ with ui.nav_panel("Explore"):
             def m_map():
                 return lens_map("m_map", lens_frame(), mwhere(input.pick()))
 
-        with ui.layout_columns(col_widths=[6, 6]):
+        if True:
             with ui.card():
                 ui.card_header("Types by region")
 
@@ -1169,6 +1257,10 @@ with ui.nav_panel("Explore"):
 
 # ======================================================= procurement
 with ui.nav_panel("Procurement"):
+
+    @render.ui
+    def pg_notice():
+        return notice("page")
     ui.h3("Procurement linked to the family's activities", class_="h4 mt-3 mb-1")
     ui.p("Every procurement package the pipeline linked to an activity of this family. A link is the model's reading: a lead to check, "
          "not a finding. The Completed tab sorted by country shows who has already done something.", class_="mb-2", style="max-width: 110ch; color:#4b5563")
@@ -1188,6 +1280,13 @@ with ui.nav_panel("Procurement"):
         ui.update_select("pg_country", choices=["All countries", *sorted(pk["place"].dropna().unique())])
         ui.update_select("pg_asset", choices={"": "All assets", **{k: L.short_asset(v) for k, v in an.items() if k in have}})
         ui.update_select("pg_measure", choices={"": "All measures", **{k: v for k, v in sorted(names.items(), key=lambda kv: kv[1])}})
+
+    @reactive.effect
+    @reactive.event(input.pg_status, input.pg_country, input.pg_asset, input.pg_measure)
+    def _pg_page_reset():
+        st = dict(pstate.get())
+        st["pg"] = {**st.get("pg", {}), "page": 0}
+        pstate.set(st)
 
     @reactive.calc
     def pg_pkgs():
@@ -1227,7 +1326,10 @@ with ui.nav_panel("About"):
     @render.ui
     def about_page():
         # The counts on the pipeline figure, read once and kept for six hours.
-        n = kit.cached(("wbg", "about"), lambda: W.about(q), seconds=6 * 3600)
+        try:
+            n = kit.cached(("wbg", "about"), lambda: W.about(q), seconds=6 * 3600)
+        except psycopg.Error:
+            return cui.div("The new data is not published yet, so the counts on this page cannot be read.", class_="alert alert-light border my-3 wbg-notice")
         return cui.HTML(wbg_about.page(n))
 
 
@@ -1335,7 +1437,8 @@ def dl_context():
         if input.pg_measure():
             out.append(("pg_measure", f"Measure: {measure_names().get(input.pg_measure())}", {"measure": input.pg_measure()}))
         if input.pg_status() and input.pg_status() != "All":
-            out.append(("pg_status", f"Status: {input.pg_status()}", {"status": input.pg_status()}))
+            out.append(("pg_status", f"Status: {input.pg_status()}",
+                        {"status": "Overdue" if input.pg_status() == L.LATE else input.pg_status()}))
     d = drill.get()
     if d and d["kind"] == "acts" and panel_inst.get() != "all":
         out.append(("panel", f"Panel: {panel_inst.get().capitalize()} only", {"instrument": panel_inst.get()}))
@@ -1359,7 +1462,7 @@ def dl_frame():
     kept, f, flt = dl_filters()
     level = input.dl_level()
     return kit.cached(("wbg", "download", level, f, tuple(sorted((k, str(v)) for k, v in flt.items()))),
-                      lambda: W.download(q, level, f, **flt), seconds=120)
+                      lambda: untype(W.download(q, level, f, **flt)), seconds=120)
 
 
 with ui.hold():
@@ -1409,6 +1512,16 @@ def workbook(sheets):
     return buf.getvalue()
 
 
+def untype(df):
+    """A download without the word kind: document_kind is document_type."""
+    return df.rename(columns={c: L.no_kind(c.replace("kind", "type")) for c in df.columns})
+
+
+def clean_notes(notes):
+    return notes.assign(item=notes["item"].map(L.no_kind).map(lambda s: s.replace("document_kind", "document_type")),
+                        text=notes["text"].map(plain).map(lambda s: s.replace("_kind", "_type")))
+
+
 def stamp():
     return f"{pd.Timestamp.today():%Y-%m-%d}"
 
@@ -1423,7 +1536,7 @@ with ui.hold():
         if input.dl_format() == "csv":
             yield df.to_csv(index=False).encode("utf-8-sig")
         else:
-            notes = W.download_notes(q, level, f, flt)
+            notes = clean_notes(W.download_notes(q, level, f, flt))
             yield workbook({level: df, "Notes": notes})
 
     @render.download(filename=lambda: f"wbg_{chosen() or 'all'}_activities_{stamp()}.xlsx")
@@ -1431,5 +1544,6 @@ with ui.hold():
         ids = panel_df()["activity_id"].tolist()
         f = chosen()
         flt = {"activity_id": ids}
-        notes = W.download_notes(q, "activity", f, {"activity_id": f"{len(ids):,} activities from the side panel", **{}})
-        yield workbook({"activities": W.download(q, "activity", f, **flt), "sentences": W.download(q, "sentence", f, **flt), "Notes": notes})
+        notes = clean_notes(W.download_notes(q, "activity", f, {"activity_id": f"{len(ids):,} activities from the side panel"}))
+        yield workbook({"activities": untype(W.download(q, "activity", f, **flt)), "sentences": untype(W.download(q, "sentence", f, **flt)),
+                        "Notes": notes})

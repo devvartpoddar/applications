@@ -8,6 +8,7 @@ from __future__ import annotations
 import html
 import json
 import math
+import re
 
 import pandas as pd
 from shiny import ui as cui
@@ -29,8 +30,9 @@ STRENGTH = ((0.95, 3, "Well above the threshold"), (0.88, 2, "Above the threshol
 STAGE_COLOR = {"Completed": "#1f8a70", "Under way": "#2458b3", "Coming up": "#c77d00",
                W.DROPPED: "#9aa1ac", "No package linked": "#9aa1ac"}
 STAGE_TAB = {"Coming up": "Coming up", "Under way": "Under way", "Completed": "Completed", W.DROPPED: "Dropped"}
-TABS = ("Coming up", "Under way", "Completed", "Dropped", "All")
-TAB_STAGE = {"Coming up": "Coming up", "Under way": "Under way", "Completed": "Completed", "Dropped": W.DROPPED}
+LATE = "Planned date passed"     # to come by the plan, but its planned date is behind us with no notice or signing recorded
+TAB_COLOR = {"Coming up": "#c77d00", LATE: "#d9b36f", "Under way": "#2458b3", "Completed": "#1f8a70", "Dropped": "#9aa1ac"}
+TABS = ("Coming up", LATE, "Under way", "Completed", "Dropped", "All")
 REGION_SHORT = {"Eastern and Southern Africa": "AFE", "Western and Central Africa": "AFW",
                 "East Asia and Pacific": "EAP", "Europe and Central Asia": "ECA",
                 "Latin America and Caribbean": "LAC", "South Asia": "SAR",
@@ -51,6 +53,28 @@ def short_type(t):
 
 def plural(n, word):
     return f"{int(n):,} {word}{'' if n == 1 else 's'}"
+
+
+def no_kind(s):
+    """The word 'kind' is not used on the dashboard: a type is a type."""
+    if not isinstance(s, str):
+        return s
+    return re.sub(r"\bKinds\b", "Types", re.sub(r"\bkinds\b", "types", re.sub(r"\bKind\b", "Type", re.sub(r"\bkind\b", "type", s))))
+
+
+def short_def(text, n=2):
+    """(the first n sentences, the rest) of a definition written for the model."""
+    parts = re.split(r"(?<=[.!?])\s+", (text or "").strip())
+    return " ".join(parts[:n]), " ".join(parts[n:])
+
+
+def definition_block(text, n=2, **kw):
+    """A definition as a reader wants it: its first sentences, the rest behind 'more'."""
+    first, rest = short_def(text, n)
+    if not first:
+        return None
+    return cui.div(cui.span(first), cui.tags.details(cui.tags.summary("more"), cui.span(rest), class_="wbg-more") if rest else None,
+                   class_="wbg-def", **kw)
 
 
 def n_acts(n):
@@ -114,7 +138,7 @@ def prep_acts(df, stages=None):
         return a or [POLICY if r["asset_column"] == "policy" else NO_ASSET]
 
     df["assets"] = [assets(r) for _, r in df.iterrows()]
-    df["asset_types"] = [[x for x in (a, b) if isinstance(x, str) and x]
+    df["asset_types"] = [[no_kind(x) for x in (a, b) if isinstance(x, str) and x]
                          for a, b in zip(df["subtype_name"], df["subtype2_name"])]
     df["types"] = df["type_names"].map(split)
     df["type_id_list"] = df["type_ids"].map(split)
@@ -137,7 +161,11 @@ def prep_pkgs(pk):
     pk["date"] = pd.to_datetime(pk["next_date"].fillna(pk["signed_date"]).fillna(pk["due_date"]))
     pk["q"] = [f"{d.year}Q{(d.month - 1) // 3 + 1}" if pd.notna(d) else None for d in pk["date"]]
     pk["acts"] = pk["activity_ids"].map(split)
-    pk["tab"] = pk["stage"].map(STAGE_TAB)
+    today = pd.Timestamp.today().normalize()
+    # Coming up: planned for today or later. Planned date passed: the date is behind us with no notice or signing
+    # recorded. A tender already out (Tendered) has started, so it counts as under way, as the plan's own words do.
+    pk["tab"] = [("Under way" if st == "Tendered" else LATE if pd.notna(d) and d < today else "Coming up") if s == "Coming up" else STAGE_TAB[s]
+                 for s, st, d in zip(pk["stage"], pk["package_status"], pk["date"])]
     return pk
 
 
@@ -219,7 +247,7 @@ def strength(p):
 
 
 def status_dot(stage, text=None):
-    return kit.dot(text or stage, STAGE_COLOR.get(stage), hollow=stage == "No package linked")
+    return kit.dot(text or stage, TAB_COLOR.get(stage) or STAGE_COLOR.get(stage), hollow=stage == "No package linked")
 
 
 def sentence(s):
@@ -261,7 +289,7 @@ def package_line(p):
     description; a click opens the package."""
     return cui.tags.button(
         {"type": "button", "class": "wbg-pkgline", **clicker({"pkg": p["package_id"]})},
-        cui.span(status_dot(p["stage"], p["package_status"]), class_="s"),
+        cui.span(status_dot(p["tab"], p["package_status"]), class_="s"),
         cui.span(day(p["date"]) or "no date", class_="d"),
         cui.span(p["package_number"] or p["package_id"], class_="n"),
         cui.span(p["description"] or "", class_="x"))
@@ -304,8 +332,8 @@ def proc_calendar(pk, key, sel_q, today):
     """One small square per linked package, stacked by quarter on a time axis, coloured by status, a line
     for today. A click on a quarter filters the list under it."""
     d = pk.dropna(subset=["date"])
-    legend = [cui.span(cui.span(class_="sq", style=f"background:{STAGE_COLOR[s]}"), f"{t} {int((d['tab'] == t).sum()):,}",
-                       class_="lg") for s, t in STAGE_TAB.items()]
+    legend = [cui.span(cui.span(class_="sq", style=f"background:{TAB_COLOR[t]}"), f"{t} {int((d['tab'] == t).sum()):,}",
+                       class_="lg") for t in TABS[:-1]]
     undated = len(pk) - len(d)
     if d.empty:
         return cui.div(cui.div(*legend, class_="pc-legend"), cui.p("No linked package has a date.", class_="wbg-muted"))
@@ -315,15 +343,15 @@ def proc_calendar(pk, key, sel_q, today):
     counts = d.groupby("q").size()
     rows = max(1, math.ceil(counts.max() / per_row))
     height = rows * 11 + 6
-    order = {s: i for i, s in enumerate(STAGE_TAB)}
+    order = {t: i for i, t in enumerate(TABS)}
     cols = []
     for q in qs:
         name = f"{q.year}Q{q.quarter}"
-        mine = d[d["q"] == name].assign(o=lambda x: x["stage"].map(order)).sort_values(["o", "date"])
-        sq = [cui.span(class_="sq", style=f"background:{STAGE_COLOR[r.stage]}",
+        mine = d[d["q"] == name].assign(o=lambda x: x["tab"].map(order)).sort_values(["o", "date"])
+        sq = [cui.span(class_="sq", style=f"background:{TAB_COLOR[r.tab]}",
                        title=f"{r.package_number or r.package_id} · {(r.description or '')[:70]} · {r.package_status}")
               for r in mine.itertuples()]
-        tip = f"{q.year} Q{q.quarter}: " + (", ".join(f"{int((mine['tab'] == t).sum())} {t.lower()}" for t in STAGE_TAB.values()
+        tip = f"{q.year} Q{q.quarter}: " + (", ".join(f"{int((mine['tab'] == t).sum())} {t.lower()}" for t in TABS[:-1]
                                                        if (mine["tab"] == t).any()) or "no packages")
         cols.append(cui.tags.button(*sq, {"type": "button", "class": "pc-q" + (" sel" if sel_q == name else "")
                                           + (" y" if q.quarter == 1 else ""), "title": tip,
@@ -359,7 +387,7 @@ def proc_for(r, names):
     return cui.span("Same asset: " + "; ".join(short_asset(x) for x in shared) if shared else "", class_="wbg-muted-s")
 
 
-def proc_list(pk, key, tab, sort, desc, limit, sel_q, asset_names, *, tabs=True, hide=()):
+def proc_list(pk, key, tab, sort, desc, limit, sel_q, asset_names, *, tabs=True, hide=(), page=None):
     """The list under the calendar: status tabs, then one row per package. A click opens the package."""
     counts = {t: int((pk["tab"] == t).sum()) for t in TABS[:-1]}
     counts["All"] = len(pk)
@@ -378,7 +406,7 @@ def proc_list(pk, key, tab, sort, desc, limit, sel_q, asset_names, *, tabs=True,
     col, sec = SORTS[sort][1][0], SORTS[sort][1][1:]
     view = view.sort_values([col, *sec], ascending=[not desc, *[True] * len(sec)], na_position="last", kind="stable")
     total = len(view)
-    view = view.head(limit)
+    view = view.head(limit) if page is None else view.iloc[page * limit:(page + 1) * limit]
 
     def th(name, label, cls=""):
         if name not in SORTS:
@@ -397,7 +425,7 @@ def proc_list(pk, key, tab, sort, desc, limit, sel_q, asset_names, *, tabs=True,
     for _, r in view.iterrows():
         cells = {"date": cui.tags.td(day(r["date"]) or "no date", class_="w-date"),
                  "pkg": cui.tags.td(r["package_number"] or r["package_id"], class_="w-pkg"),
-                 "desc": cui.tags.td(cui.div(r["description"] or "", class_="clamp"), status_dot(r["stage"], r["package_status"])
+                 "desc": cui.tags.td(cui.div(r["description"] or "", class_="clamp"), status_dot(r["tab"], r["package_status"])
                                      if tab == "All" else None),
                  "project": cui.tags.td(cui.div(r["project_name"], class_="clamp"), class_="w-proj"),
                  "country": cui.tags.td(r["place"], class_="w-ctry"),
@@ -409,10 +437,18 @@ def proc_list(pk, key, tab, sort, desc, limit, sel_q, asset_names, *, tabs=True,
     if not body:
         body = [cui.tags.tr(cui.tags.td("No linked packages here.", colspan=len(cols), class_="wbg-muted", style="padding:18px 8px"))]
     more = None
-    if total > limit:
-        more = cui.div(cui.tags.button({"type": "button", "class": "btn btn-sm btn-outline-primary",
-                                        **clicker({"key": key, "more": True}, "pc")}, f"Show {min(100, total - limit):,} more"),
-                       cui.span(f"Showing {limit:,} of {total:,}", class_="wbg-muted-s ms-2"), class_="mt-2")
+    if page is not None and total > limit:
+        last = (total - 1) // limit
+        btn = lambda label, to, off: cui.tags.button({"type": "button", "class": "btn btn-sm btn-outline-primary", "disabled": "" if off else None,
+                                                     **clicker({"key": key, "page": to}, "pc")}, label)  # noqa: E731
+        more = cui.div(btn("‹ Previous", page - 1, page == 0), cui.span(f"{page * limit + 1:,}–{min(total, (page + 1) * limit):,} of {total:,}", class_="wbg-muted-s mx-2"),
+                       btn("Next ›", page + 1, page == last), class_="mt-2 d-flex align-items-center")
+    elif page is None and total > limit:
+        more = cui.div(cui.tags.button({"type": "button", "class": "btn btn-sm btn-outline-primary", **clicker({"key": key, "more": True}, "pc")},
+                                       f"Show all {total:,}"), cui.span(f"Showing the first {limit:,}", class_="wbg-muted-s ms-2"), class_="mt-2")
+    elif page is None and limit > 8 and total > 8:
+        more = cui.div(cui.tags.button({"type": "button", "class": "btn btn-sm btn-outline-secondary", **clicker({"key": key, "fewer": True}, "pc")},
+                                       "Show fewer"), class_="mt-2")
     return cui.div(cui.div(*head, class_="pc-tabs") if head else None,
                    cui.div(cui.tags.table(cui.tags.thead(thead), cui.tags.tbody(*body), class_="wbg-table pc-table"), class_="wbg-scroll"),
                    more)
@@ -453,7 +489,7 @@ def package_sheet(parts, acts_cards, project_btn):
         ("Supplier", [("Supplier", p["supplier"]), ("Supplier country", p["supplier_country"])]),
         ("The plan", [("Plan document", p["plan_document_id"]), ("Plan published", day(p["plan_disclosure_date"]))]),
     ]
-    out = [cui.div(status_dot(p["stage"], p["package_status"]), class_="mb-1"),
+    out = [cui.div(status_dot(p["tab"], p["package_status"]), class_="mb-1"),
            cui.p(p["description"] or "", class_="mb-1 fw-semibold"),
            cui.p(cui.span(p["project_name"], " · ", p["place"]), project_btn, class_="mb-1 small"),
            cui.p(link, class_="wbg-muted-s mb-3") if link else None]
@@ -488,6 +524,7 @@ def package_sheet(parts, acts_cards, project_btn):
 
 CSS = """
 :root { --wbg-muted: #6b7280; --wbg-ink2: #4b5563; --wbg-line: #d9dde3; }
+.tab-pane:has(.wbg-notice) .card, .tab-pane:has(.wbg-notice) .wbg-filters, .tab-pane:has(.wbg-notice) > .d-flex, .tab-pane:has(.wbg-notice) .alert-light:not(.wbg-notice) { display: none; }
 .wbg-muted { color: var(--wbg-muted); }
 .wbg-muted-s { color: var(--wbg-muted); font-size: 12.5px; }
 .wbg-sub { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--wbg-ink2); margin: 16px 0 6px; padding-bottom: 3px; border-bottom: 1px solid var(--wbg-line); }
@@ -541,6 +578,10 @@ a.nav-link[data-value="Start"], li:has(> a.nav-link[data-value="Start"]) { displ
 .wbg-table tr.go { cursor: pointer; }
 .wbg-table tr.go:hover td { background: #f4f7fc; }
 .wbg-table .clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.35; }
+.wbg-ctable { width: 100%; min-width: 900px; }
+.wbg-ctable td.pn { min-width: 260px; }
+.wbg-ctable th, .wbg-ctable td { white-space: nowrap; }
+.wbg-ctable td.pn { white-space: normal; }
 .wbg-table .id { display: block; font-size: 12px; color: var(--wbg-muted); }
 .wbg-table.mini { font-size: 12.5px; }
 .wbg-table.mini td, .wbg-table.mini th { padding: 4px 8px 4px 0; }
@@ -606,9 +647,9 @@ a.nav-link[data-value="Start"], li:has(> a.nav-link[data-value="Start"]) { displ
 .wbg-act .tags .kit-tag { margin: 0; }
 .wbg-act .inner { padding: 8px 12px 10px; }
 .wbg-sentence .kit-quote { margin: 4px 0 8px; }
-.wbg-pkgline { display: grid; grid-template-columns: 112px 84px 92px 1fr; gap: 8px; align-items: baseline; width: 100%; text-align: left; background: none; border: 0; border-top: 1px solid #eceef1; padding: 5px 0; font-size: 12.5px; cursor: pointer; color: inherit; }
+.wbg-pkgline { display: grid; grid-template-columns: 112px 84px 92px 1fr; gap: 8px; align-items: start; width: 100%; text-align: left; background: none; border: 0; border-top: 1px solid #eceef1; padding: 5px 0; font-size: 12.5px; cursor: pointer; color: inherit; }
 .wbg-pkgline:hover { background: #f4f7fc; }
-.wbg-pkgline .x { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--wbg-ink2); }
+.wbg-pkgline .x { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--wbg-ink2); line-height: 1.35; }
 .wbg-pkgline .n { color: var(--wbg-ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wbg-dl { display: grid; grid-template-columns: 150px 1fr; gap: 3px 12px; margin: 0; font-size: 13.5px; }
 .wbg-dl dt { font-weight: 400; color: var(--wbg-muted); }
@@ -641,13 +682,19 @@ a.nav-link[data-value="Start"], li:has(> a.nav-link[data-value="Start"]) { displ
 .wbg-filters { display: flex; flex-wrap: wrap; gap: 16px; align-items: end; margin: 14px 0; }
 .wbg-filters .shiny-input-container { margin: 0; }
 .wbg-filters label { font-size: 12px; font-weight: 600; color: var(--wbg-ink2); margin-bottom: 2px; }
+.wbg-def { max-width: 80ch; line-height: 1.45; }
+.wbg-more > summary { display: inline; color: var(--bs-primary, #2458b3); cursor: pointer; margin-left: 4px; list-style: none; font-weight: 500; }
+.wbg-more > summary::-webkit-details-marker { display: none; }
+.wbg-more[open] > summary { display: none; }
+.wbg-more { display: inline; }
 .wbg-facts { font-weight: 600; margin: 0; }
 /* download */
 .dl-levels .shiny-options-group { display: flex; flex-direction: column; gap: 8px; }
 .dl-levels .radio, .dl-levels .form-check { margin: 0; padding: 8px 12px; border: 1px solid var(--wbg-line); border-radius: 6px; }
 .dl-levels .radio:has(input:checked), .dl-levels .form-check:has(input:checked) { border-color: #2458b3; background: #f4f7fc; }
-.dl-levels label { width: 100%; margin: 0; }
-.dl-levels label > span { display: block; padding-left: 4px; }
+.dl-levels label { width: 100%; margin: 0; display: flex; align-items: flex-start; gap: 12px; cursor: pointer; }
+.dl-levels label input { position: static; margin: 3px 0 0; flex: none; }
+.dl-levels label > span { display: block; padding: 0; }
 .dl-levels label b { display: block; font-size: 14px; }
 .dl-levels label small { display: block; font-size: 12.5px; color: var(--wbg-ink2); font-weight: 400; }
 .dl-chip { display: inline-flex; gap: 6px; align-items: center; background: #e3ebf8; color: #1a4287; border: 1px solid #c5d5f0; border-radius: 99px; padding: 2px 4px 2px 10px; font-size: 13px; margin: 0 6px 6px 0; }

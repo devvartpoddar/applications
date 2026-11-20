@@ -15,7 +15,7 @@ CSS = """
 .kit-heat { width: max-content; border-collapse: separate; border-spacing: 3px; table-layout: fixed; font-size: 13px; }
 .kit-heat th, .kit-heat td { padding: 0; font-weight: 400; vertical-align: middle; }
 .kit-heat thead th { vertical-align: bottom; text-align: center; font-size: 11.5px; line-height: 1.25; color: #4b5563; padding: 0 2px 4px; }
-.kit-heat thead th .n, .kit-heat tbody th .n { display: block; overflow-wrap: break-word; }
+.kit-heat thead th .n, .kit-heat tbody th .n { display: block; overflow-wrap: normal; word-break: normal; }
 .kit-heat tbody th { text-align: right; font-size: 12.5px; line-height: 1.25; color: var(--bs-body-color, #1b1f24); padding-right: 8px; }
 .kit-heat .lnk { cursor: pointer; background: none; border: 0; padding: 0; font: inherit; color: inherit; text-align: inherit; width: 100%; }
 .kit-heat .lnk:hover { color: var(--bs-primary, #2458b3); text-decoration: underline; }
@@ -53,6 +53,9 @@ def heat_table(rows, cols, z, *, row_tot=None, col_tot=None, grand=None, keys=No
     col_nav[j]: what a click on the name sends. hover[i][j], row_hover, col_hover: titles.
     text[i][j]: what a cell shows instead of its number."""
     top = max([v for r in z for v in r if v] or [0])
+    # a column is wide enough for the longest word of its name: names wrap at spaces, never inside a word
+    word = max([len(w) for c in cols for w in str(c).split()] or [0])
+    cell_w = max(cell_w, int(word * 6.4) + 12)
     ths = [ui.tags.th(class_="c0")]
     for j, c in enumerate(cols):
         label = ui.span(c, class_="n")
