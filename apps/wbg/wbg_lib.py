@@ -18,21 +18,24 @@ from wbg_portfolio import app as W
 
 # ---------------------------------------------------------------- words
 
-POLICY = "Policy and regulation"     # an activity about policy, not about one asset
-NO_ASSET = "No single asset"
+NO_ASSET = "No single asset"         # an activity whose documents name no one asset (policy is an instrument, never an asset)
 ASSET_SHORT = {"Connectivity networks": "Connectivity", "Digital platforms and systems": "Digital platforms",
                "Monitoring, warning and control systems": "Monitoring and control"}
 DOC_KIND = {"pad": "Appraisal document", "additional_financing": "Additional financing paper",
             "restructuring": "Restructuring paper", "project_paper_other": "Project paper"}
 # How far above its threshold a sentence's probability is, shown as one to three bars and never as a number.
 STRENGTH = ((0.95, 3, "Well above the threshold"), (0.88, 2, "Above the threshold"), (0.0, 1, "Near the threshold"))
-# One colour per stage of procurement, wherever one is shown (the dropped one is muted on purpose).
-_ST = kit.look()["status"]
-STAGE_COLOR = {**_ST, W.DROPPED: _ST["Dropped"]}
-STAGE_TAB = {"Coming up": "Coming up", "Under way": "Under way", "Completed": "Completed", W.DROPPED: "Dropped"}
-LATE = "Planned date passed"     # to come by the plan, but its planned date is behind us with no notice or signing recorded
-TAB_COLOR = _ST
-TABS = ("Coming up", LATE, "Under way", "Completed", "Dropped", "All")
+# The status of a procurement package, by the names the procurement plan itself uses (the reader's package_status),
+# in the order a package moves through them, then the two ways it leaves the plan. The reader also says Overdue: a
+# package still Planned whose planned date is behind us with no notice or signing recorded. It is the same status,
+# so it is shown as Planned, drawn hollow and noted "date passed".
+STATUSES = ("Planned", "Tendered", "Contract signed", "Under implementation", "Contract completed", "Cancelled",
+            "Not in latest plan")
+SAME_STATUS = {"Overdue": "Planned"}
+TO_COME = ("Planned", "Tendered")
+STATUS_COLOR = kit.look()["status"]
+TABS = (*STATUSES, "All")
+LATE_NOTE = "date passed"
 REGION_SHORT = {"Eastern and Southern Africa": "AFE", "Western and Central Africa": "AFW",
                 "East Asia and Pacific": "EAP", "Europe and Central Asia": "ECA",
                 "Latin America and Caribbean": "LAC", "South Asia": "SAR",
@@ -116,26 +119,26 @@ def source(kind, date):
 # ---------------------------------------------------------------- frames
 
 def axis_values(assets_df):
-    """The asset axis, in the order the dashboard shows it: the assets, policy, no single asset."""
+    """The asset axis, in the order the dashboard shows it: the assets, then no single asset."""
     names = list(dict.fromkeys(assets_df["asset_name"])) if len(assets_df) else []
-    return names + [POLICY, NO_ASSET]
+    return names + [NO_ASSET]
 
 
 def prep_acts(df, stages=None):
     """The activities frame with what the pages need beside the reader's columns: the asset axis
-    values (one per asset, or Policy and regulation, or No single asset), the asset types, the
+    values (one per asset, or No single asset), the asset types, the
     types as lists, the procurement summary and the instrument as a word."""
     df = df.copy()
     if df.empty:
         for c in ("assets", "asset_types", "types", "type_id_list"):
             df[c] = pd.Series(dtype=object)
-        for c in ("stage", "chip", "pk_stage", "pk_date", "pk_id", "pk_n"):
+        for c in ("stage", "chip", "pk_stage", "pk_date", "pk_id", "pk_n", "pk_late"):
             df[c] = pd.Series(dtype=object)
         return df
 
     def assets(r):
         a = [x for x in (r["asset_name"], r["asset2_name"]) if isinstance(x, str) and x]
-        return a or [POLICY if r["asset_column"] == "policy" else NO_ASSET]
+        return a or [NO_ASSET]
 
     df["assets"] = [assets(r) for _, r in df.iterrows()]
     df["asset_types"] = [[no_kind(x) for x in (a, b) if isinstance(x, str) and x]
@@ -155,52 +158,52 @@ def prep_pkgs(pk):
     tab."""
     pk = pk.copy()
     if pk.empty:
-        for c in ("date", "q", "acts", "tab"):
+        for c in ("date", "q", "acts", "tab", "late"):
             pk[c] = pd.Series(dtype=object)
         return pk
     pk["date"] = pd.to_datetime(pk["next_date"].fillna(pk["signed_date"]).fillna(pk["due_date"]))
     pk["q"] = [f"{d.year}Q{(d.month - 1) // 3 + 1}" if pd.notna(d) else None for d in pk["date"]]
     pk["acts"] = pk["activity_ids"].map(split)
     today = pd.Timestamp.today().normalize()
-    # Coming up: planned for today or later. Planned date passed: the date is behind us with no notice or signing
-    # recorded. A tender already out (Tendered) has started, so it counts as under way, as the plan's own words do.
-    pk["tab"] = [("Under way" if st == "Tendered" else LATE if pd.notna(d) and d < today else "Coming up") if s == "Coming up" else STAGE_TAB[s]
-                 for s, st, d in zip(pk["stage"], pk["package_status"], pk["date"])]
+    # The status as the plan names it; Overdue is Planned with its date behind us, kept as a flag (late).
+    pk["tab"] = pk["package_status"].map(lambda v: SAME_STATUS.get(v, v))
+    pk["late"] = [st == "Overdue" or (t == "Planned" and pd.notna(d) and d < today)
+                  for st, t, d in zip(pk["package_status"], pk["tab"], pk["date"])]
     return pk
 
 
 def link_procurement(acts, pk):
-    """Adds to each activity where its procurement stands: the stage of its most pressing linked
-    package, and the next (else latest) package with its date."""
+    """Adds to each activity where its procurement stands: the status of its least advanced linked
+    package, and the next (else latest) package with its status and date."""
     acts = acts.copy()
-    cols = ["stage", "pk_stage", "pk_date", "pk_id", "pk_n"]
+    cols = ["stage", "pk_stage", "pk_date", "pk_id", "pk_n", "pk_late"]
     if acts.empty:
         for c in cols:
             acts[c] = pd.Series(dtype=object)
         return acts
     best: dict = {}
-    order = {s: i for i, s in enumerate(W.STAGE_URGENCY)}
+    order = {s: i for i, s in enumerate(STATUSES)}
     for r in pk.itertuples():
         for a in r.acts:
             cur = best.setdefault(a, {"stage": None, "n": 0, "next": None, "last": None})
             cur["n"] += 1
-            if cur["stage"] is None or order[r.stage] < order[cur["stage"]]:
-                cur["stage"] = r.stage
-            if r.stage == "Coming up" and pd.notna(r.date) and (cur["next"] is None or r.date < cur["next"][0]):
-                cur["next"] = (r.date, r.package_id, r.stage)
+            if cur["stage"] is None or order.get(r.tab, 99) < order.get(cur["stage"], 99):
+                cur["stage"] = r.tab
+            if r.tab in TO_COME and pd.notna(r.date) and (cur["next"] is None or r.date < cur["next"][0]):
+                cur["next"] = (r.date, r.package_id, r.tab, bool(r.late))
             if pd.notna(r.date) and (cur["last"] is None or r.date > cur["last"][0]):
-                cur["last"] = (r.date, r.package_id, r.stage)
-    st, pst, pdt, pid, pn = [], [], [], [], []
+                cur["last"] = (r.date, r.package_id, r.tab, bool(r.late))
+    st, pst, pdt, pid, pn, pl = [], [], [], [], [], []
     for a in acts["activity_id"]:
         b = best.get(a)
         if not b:
-            st.append("No package linked"); pst.append(None); pdt.append(pd.NaT); pid.append(None); pn.append(0)
+            st.append("No package linked"); pst.append(None); pdt.append(pd.NaT); pid.append(None); pn.append(0); pl.append(False)
             continue
         pick = b["next"] or b["last"]
         st.append(b["stage"]); pn.append(b["n"])
         pst.append(pick[2] if pick else b["stage"]); pdt.append(pick[0] if pick else pd.NaT)
-        pid.append(pick[1] if pick else None)
-    acts["stage"], acts["pk_stage"], acts["pk_date"], acts["pk_id"], acts["pk_n"] = st, pst, pdt, pid, pn
+        pid.append(pick[1] if pick else None); pl.append(pick[3] if pick else False)
+    acts["stage"], acts["pk_stage"], acts["pk_date"], acts["pk_id"], acts["pk_n"], acts["pk_late"] = st, pst, pdt, pid, pn, pl
     return acts
 
 
@@ -246,8 +249,18 @@ def strength(p):
                     **{"aria-label": label, "data-tip": label})
 
 
-def status_dot(stage, text=None):
-    return kit.dot(text or stage, TAB_COLOR.get(stage) or STAGE_COLOR.get(stage), hollow=stage == "No package linked")
+def status_mark(status, late=False, **attrs):
+    """The small square of a status, as the calendar draws it: filled, or hollow for a Planned package whose date
+    has passed."""
+    c = STATUS_COLOR.get(status, STATUS_COLOR["No package linked"])
+    style = f"box-shadow: inset 0 0 0 1.5px {c}; background: #fff" if late else f"background:{c}"
+    return cui.span(class_="sq", style=style, **attrs)
+
+
+def status_dot(status, late=False, text=None):
+    """A package's status in words beside its square; 'date passed' after a Planned package's date has gone by."""
+    return cui.span(status_mark(status, late), cui.span(text or status),
+                    cui.span(f" · {LATE_NOTE}", class_="late") if late else None, class_="wbg-st")
 
 
 def sentence(s):
@@ -270,7 +283,7 @@ def applied_to(r):
     parts = []
     for i, a in enumerate(r["assets"]):
         t = r["asset_types"][i] if i < len(r["asset_types"]) else None
-        parts.append(f"{short_asset(a)} · {t}" if t and a not in (POLICY, NO_ASSET) else short_asset(a))
+        parts.append(f"{short_asset(a)} · {t}" if t and a != NO_ASSET else short_asset(a))
     return parts
 
 
@@ -289,7 +302,7 @@ def package_line(p):
     description; a click opens the package."""
     return cui.tags.button(
         {"type": "button", "class": "wbg-pkgline", **clicker({"pkg": p["package_id"]})},
-        cui.span(status_dot(p["tab"], p["package_status"]), class_="s"),
+        cui.span(status_dot(p["tab"], p["late"]), class_="s"),
         cui.span(day(p["date"]) or "no date", class_="d"),
         cui.span(p["package_number"] or p["package_id"], class_="n"),
         cui.span(p["description"] or "", class_="x"))
@@ -332,8 +345,12 @@ def proc_calendar(pk, key, sel_q, today):
     """One small square per linked package, stacked by quarter on a time axis, coloured by status, a line
     for today. A click on a quarter filters the list under it."""
     d = pk.dropna(subset=["date"])
-    legend = [cui.span(cui.span(class_="sq", style=f"background:{TAB_COLOR[t]}"), f"{t} {int((d['tab'] == t).sum()):,}",
-                       class_="lg") for t in TABS[:-1]]
+    legend = [cui.span(status_mark(t), t, cui.span(f"{int((d['tab'] == t).sum()):,}", class_="c"), class_="lg") for t in STATUSES]
+    late = int(d["late"].sum())
+    if late:
+        legend.append(cui.span(status_mark("Planned", True), f"Planned, {LATE_NOTE}", cui.span(f"{late:,}", class_="c"),
+                               class_="lg note", **{"data-tip": "Planned, date passed\nStill planned, but the planned date is behind "
+                                                                "us and no notice or signing is recorded."}))
     undated = len(pk) - len(d)
     if d.empty:
         return cui.div(cui.div(*legend, class_="pc-legend"), cui.p("No linked package has a date.", class_="wbg-muted"))
@@ -347,11 +364,12 @@ def proc_calendar(pk, key, sel_q, today):
     cols = []
     for q in qs:
         name = f"{q.year}Q{q.quarter}"
-        mine = d[d["q"] == name].assign(o=lambda x: x["tab"].map(order)).sort_values(["o", "date"])
-        sq = [cui.span(class_="sq", style=f"background:{TAB_COLOR[r.tab]}",
-                       **{"data-tip": f"{r.package_number or r.package_id} · {(r.description or '')[:70]}\n{r.package_status}"})
+        mine = d[d["q"] == name].assign(o=lambda x: x["tab"].map(order)).sort_values(["o", "late", "date"])
+        sq = [status_mark(r.tab, r.late,
+                       **{"data-tip": f"{r.package_number or r.package_id} · {(r.description or '')[:70]}\n{r.tab}"
+                                      + (f", {LATE_NOTE}" if r.late else "")})
               for r in mine.itertuples()]
-        tip = f"{q.year} Q{q.quarter}\n" + (", ".join(f"{int((mine['tab'] == t).sum())} {t.lower()}" for t in TABS[:-1]
+        tip = f"{q.year} Q{q.quarter}\n" + (", ".join(f"{int((mine['tab'] == t).sum())} {t.lower()}" for t in STATUSES
                                                        if (mine["tab"] == t).any()) or "no packages")
         cols.append(cui.tags.button(*sq, {"type": "button", "class": "pc-q" + (" sel" if sel_q == name else "")
                                           + (" y" if q.quarter == 1 else ""), "data-tip": tip,
@@ -389,13 +407,13 @@ def proc_for(r, names):
 
 def proc_list(pk, key, tab, sort, desc, limit, sel_q, asset_names, *, tabs=True, hide=(), page=None):
     """The list under the calendar: status tabs, then one row per package. A click opens the package."""
-    counts = {t: int((pk["tab"] == t).sum()) for t in TABS[:-1]}
+    counts = {t: int((pk["tab"] == t).sum()) for t in STATUSES}
     counts["All"] = len(pk)
     head = []
     if tabs:
-        head = [cui.tags.button({"type": "button", "class": "pc-tab" + (" on" if t == tab else ""),
+        head = [cui.tags.button({"type": "button", "class": "pc-tab" + (" on" if t == tab else "") + ("" if counts[t] else " zero"),
                                  **clicker({"key": key, "tab": t}, "pc")},
-                                t, cui.span(f"{counts[t]:,}", class_="c")) for t in TABS]
+                                status_mark(t) if t != "All" else None, t, cui.span(f"{counts[t]:,}", class_="c")) for t in TABS]
     if sel_q:
         y, q = sel_q.split("Q")
         head.append(cui.tags.button({"type": "button", "class": "pc-qchip", "data-tip": "Show every quarter",
@@ -404,7 +422,9 @@ def proc_list(pk, key, tab, sort, desc, limit, sel_q, asset_names, *, tabs=True,
     if sel_q:
         view = view[view["q"] == sel_q]
     col, sec = SORTS[sort][1][0], SORTS[sort][1][1:]
-    view = view.sort_values([col, *sec], ascending=[not desc, *[True] * len(sec)], na_position="last", kind="stable")
+    # what is still to come before what is late: on the Planned tab by date, the packages whose date has passed go last
+    first = ["late"] if sort == "date" and tab == "Planned" else []
+    view = view.sort_values([*first, col, *sec], ascending=[*[True] * len(first), not desc, *[True] * len(sec)], na_position="last", kind="stable")
     total = len(view)
     view = view.head(limit) if page is None else view.iloc[page * limit:(page + 1) * limit]
 
@@ -423,9 +443,9 @@ def proc_list(pk, key, tab, sort, desc, limit, sel_q, asset_names, *, tabs=True,
     thead = cui.tags.tr(*[th(n if n in SORTS else "", l, c) for n, l, c in cols])
     body = []
     for _, r in view.iterrows():
-        cells = {"date": cui.tags.td(day(r["date"]) or "no date", class_="w-date"),
+        cells = {"date": cui.tags.td(day(r["date"]) or "no date", cui.div(LATE_NOTE, class_="late") if r["late"] else None, class_="w-date"),
                  "pkg": cui.tags.td(r["package_number"] or r["package_id"], class_="w-pkg"),
-                 "desc": cui.tags.td(cui.div(r["description"] or "", class_="clamp"), status_dot(r["tab"], r["package_status"])
+                 "desc": cui.tags.td(cui.div(r["description"] or "", class_="clamp"), status_dot(r["tab"], r["late"])
                                      if tab == "All" else None),
                  "project": cui.tags.td(cui.div(r["project_name"], class_="clamp"), class_="w-proj"),
                  "country": cui.tags.td(r["place"], class_="w-ctry"),
@@ -465,31 +485,37 @@ def _dl(rows):
     return cui.tags.dl(*out, class_="wbg-dl")
 
 
-STEPS = ("Planned", "Notice", "Signed", "Completed")
+STEPS = STATUSES[:5]     # the way through the plan; Cancelled and Not in latest plan leave it
 
 
 def stage_strip(p):
-    """Where a package stands: Planned, Notice, Signed, Completed, with the date under each step that has happened
-    and the date planned for the next one."""
-    status = p["package_status"]
-    signed_on = status in ("Contract signed", "Under implementation", "Contract completed")
-    reached = [True, pd.notna(p["notice_date"]) or status == "Tendered" or signed_on, pd.notna(p["signed_date"]) or signed_on,
-               status == "Contract completed"]
-    dates = [p["planned_date"], p["notice_date"], p["signed_date"], pd.NaT]
+    """Where a package stands, by the plan's own statuses: Planned, Tendered, Contract signed, Under implementation,
+    Contract completed, each reached step in its own colour with its date, and the date planned for the next one.
+    A package cancelled or no longer in the plan shows the steps it reached and none after."""
+    status = p["tab"]
+    at = STEPS.index(status) if status in STEPS else None
+    reached = [i <= at if at is not None else False for i in range(len(STEPS))]
+    if at is None:      # left the plan: what it had reached by its dates
+        reached = [True, pd.notna(p["notice_date"]), pd.notna(p["signed_date"]), False, False]
+    reached[1] = reached[1] or pd.notna(p["notice_date"])
+    dates = [p["planned_date"], p["notice_date"], p["signed_date"], pd.NaT, pd.NaT]
     nxt = next((i for i, r in enumerate(reached) if not r), None)
-    dropped = p["tab"] == "Dropped"
     out = []
     for i, name in enumerate(STEPS):
+        c = STATUS_COLOR[name]
         if reached[i]:
             under = day(dates[i], "%d %b %Y") if pd.notna(dates[i]) else ""
-            cls = "done"
-        elif i == nxt and not dropped:
+            if i == 0 and p["late"]:
+                under = (under + " · " if under else "") + LATE_NOTE
+            cls, style = "done", f"--st:{c}"
+        elif i == nxt and at is not None:
             plan = p["next_date"] if pd.notna(p["next_date"]) else p["due_date"] if pd.notna(p["due_date"]) else dates[i]
-            under = ("planned " + day(plan, "%d %b %Y")) if pd.notna(plan) else ""
-            cls = "next"
+            under = ("planned " + day(plan, "%d %b %Y")) if pd.notna(plan) and not (pd.notna(dates[0]) and plan == dates[0]) else ""
+            cls, style = "next", f"--st:{c}"
         else:
-            under, cls = "", "todo"
-        out.append(cui.div(cui.span(class_="dot"), cui.div(name, class_="nm"), cui.div(under, class_="dt"), class_="wbg-step " + cls))
+            under, cls, style = "", "todo", None
+        out.append(cui.div(cui.span(class_="dot"), cui.div(name, class_="nm"), cui.div(under, class_="dt"),
+                           class_="wbg-step " + cls, style=style))
     return cui.div(*out, class_="wbg-steps")
 
 
@@ -536,7 +562,7 @@ def package_sheet(parts, acts_cards, project_btn, names=None):
     return cui.div(
         cui.p(p["description"] or "", class_="mb-1 fw-semibold"),
         cui.p(cui.span(p["project_name"], " · ", p["place"]), project_btn, class_="mb-2 small"),
-        cui.div(status_dot(p["tab"], p["package_status"]), class_="mb-1"),
+        cui.div(status_dot(p["tab"], p["late"]), class_="mb-1"),
         stage_strip(p),
         cui.div(*estimate, class_="mt-3"),
         cui.div(muted, class_="wbg-muted-s"),
@@ -568,6 +594,21 @@ a.nav-link[data-value="Start"], li:has(> a.nav-link[data-value="Start"]) { displ
 .wbg-fam a { font-size: 12.5px; color: #9bb8ea; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .wbg-fam a:hover { color: #fff; }
 .navbar .wbg-top { display: flex; gap: 8px; align-items: center; }
+.wbg-find { position: relative; }
+.wbg-find-btn { color: #fff; border: 1px solid rgba(255,255,255,.45); width: 36px; height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.wbg-find-btn:hover, .wbg-find.open .wbg-find-btn { background: rgba(255,255,255,.12); color: #fff; border-color: #fff; }
+.wbg-find .box { display: none; position: absolute; right: 0; top: calc(100% + 10px); z-index: 1050; background: #fff; border-radius: var(--k-radius-lg);
+  box-shadow: 0 6px 24px rgba(0,0,0,.18); padding: 8px; }
+.wbg-find.open .box { display: block; }
+.wbg-find .box .shiny-input-container { margin: 0; }
+/* the row a page opens with: its title or intro on the left, the Count switch on the right, the same on every page */
+.wbg-titlerow { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px 32px; margin: 18px 0 16px; }
+.wbg-titlerow > p { max-width: 110ch; }
+.wbg-titlerow.ex .shiny-input-container { margin-bottom: 0; }
+.wbg-titlerow > .shiny-html-output { flex: none; }
+@media (max-width: 900px) { .wbg-titlerow { flex-wrap: wrap; } .wbg-titlerow > p { flex-basis: 100%; } }
+.wbg-unit { display: inline-flex; align-items: center; gap: 8px; flex: none; }
+.wbg-unit .lb { font-size: 12.5px; color: var(--wbg-muted); }
 .navbar .wbg-top .shiny-input-container { margin-bottom: 0; }
 .navbar .wbg-top .form-select, .navbar .wbg-top .selectize-input, .navbar .wbg-top .btn { font-size: 14px; min-height: 34px; }
 /* start page */
@@ -617,9 +658,14 @@ a.nav-link[data-value="Start"], li:has(> a.nav-link[data-value="Start"]) { displ
 .wbg-chip.inv { background: var(--k-inv-bg); color: var(--k-inv); }
 .wbg-chip.pol { background: var(--k-pol-bg); color: var(--k-pol); }
 /* procurement */
-.pc-legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; margin-bottom: 8px; }
-.pc-legend .sq, .pc-cols .sq { display: inline-block; width: 9px; height: 9px; border-radius: 2px; }
-.pc-legend .lg { display: inline-flex; align-items: center; gap: 6px; }
+.sq { display: inline-block; width: 9px; height: 9px; border-radius: 2px; flex: none; }
+.wbg-st { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.wbg-st .late, .pc-table .late { color: #8a5a00; font-size: 12px; }
+.wbg-st .late { margin-left: -4px; }
+.pc-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; margin-bottom: 8px; align-items: center; }
+.pc-legend .lg { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.pc-legend .lg .c { color: var(--wbg-muted); font-variant-numeric: tabular-nums; }
+.pc-legend .lg.note { padding-left: 16px; border-left: 1px solid var(--wbg-line); color: var(--wbg-ink2); }
 .pc-scroll { overflow-x: auto; padding-bottom: 2px; }
 .pc-chart { width: 100%; }
 .pc-cols { position: relative; display: flex; align-items: stretch; border-bottom: 1px solid var(--wbg-line); }
@@ -634,7 +680,8 @@ a.nav-link[data-value="Start"], li:has(> a.nav-link[data-value="Start"]) { displ
 .pc-ax.y { border-left: 1px solid var(--k-rule); }
 .pc-ax .yr { font-size: 11.5px; font-weight: 600; color: var(--wbg-ink2); white-space: nowrap; }
 .pc-tabs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 14px 0 8px; }
-.pc-tab { border: 1px solid var(--wbg-line); background: #fff; border-radius: 99px; padding: 3px 12px; font-size: 13px; cursor: pointer; display: inline-flex; gap: 7px; }
+.pc-tab { border: 1px solid var(--wbg-line); background: #fff; border-radius: 99px; padding: 3px 12px; font-size: 13px; cursor: pointer; display: inline-flex; gap: 7px; align-items: center; white-space: nowrap; }
+.pc-tab.zero { color: var(--wbg-muted); }
 .pc-tab .c { color: var(--wbg-muted); font-variant-numeric: tabular-nums; }
 .pc-tab.on { background: var(--k-ink); border-color: var(--k-ink); color: #fff; }
 .pc-tab.on .c { color: #c9d0da; }
@@ -675,24 +722,73 @@ a.nav-link[data-value="Start"], li:has(> a.nav-link[data-value="Start"]) { displ
 .wbg-act .tags .kit-tag { margin: 0; }
 .wbg-act .inner { padding: 8px 12px 10px; }
 .wbg-sentence .kit-quote { margin: 4px 0 8px; }
-.wbg-pkgline { display: grid; grid-template-columns: 112px 84px 92px 1fr; gap: 8px; align-items: start; width: 100%; text-align: left; background: none; border: 0; border-top: 1px solid var(--k-rule); padding: 5px 0; font-size: 12.5px; cursor: pointer; color: inherit; }
+.wbg-pkgline { display: grid; grid-template-columns: 150px 84px 84px 1fr; gap: 8px; align-items: start; width: 100%; text-align: left; background: none; border: 0; border-top: 1px solid var(--k-rule); padding: 5px 0; font-size: 12.5px; cursor: pointer; color: inherit; }
 .wbg-pkgline:hover { background: var(--k-hover); }
+.wbg-pkgline .wbg-st { flex-wrap: wrap; font-size: 12.5px; }
 .wbg-pkgline .x { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--wbg-ink2); line-height: 1.35; }
 .wbg-pkgline .n { color: var(--wbg-ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wbg-steps { display: grid; grid-template-columns: repeat(4, 1fr); margin: 6px 0 0; }
+.wbg-steps { display: grid; grid-template-columns: repeat(5, 1fr); margin: 6px 0 0; }
 .wbg-step { position: relative; text-align: center; padding-top: 18px; font-size: 12px; }
 .wbg-step::before { content: ""; position: absolute; top: 5px; left: -50%; right: 50%; height: 2px; background: var(--k-line); }
 .wbg-step:first-child::before { display: none; }
 .wbg-step .dot { position: absolute; top: 0; left: calc(50% - 6px); width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--k-line); background: #fff; }
-.wbg-step.done .dot { background: var(--k-st-completed); border-color: var(--k-st-completed); }
-.wbg-step.done::before { background: var(--k-st-completed); }
-.wbg-step.next .dot { border-color: var(--k-st-coming-up); }
-.wbg-step .nm { font-weight: 600; } .wbg-step.todo .nm, .wbg-step.todo { color: var(--k-muted); } .wbg-step .dt { color: var(--k-muted); min-height: 1.3em; }
+.wbg-step.done .dot { background: var(--st); border-color: var(--st); }
+.wbg-step.done::before { background: var(--st); }
+.wbg-step.next .dot { border-color: var(--st); border-style: dashed; }
+.wbg-step .nm { font-weight: 600; line-height: 1.25; } .wbg-step.todo .nm, .wbg-step.todo { color: var(--k-muted); } .wbg-step .dt { color: var(--k-muted); min-height: 1.3em; }
 .wbg-moredetails { margin-top: 14px; border-top: 1px solid var(--k-line); padding-top: 8px; }
 .wbg-moredetails > summary { cursor: pointer; color: var(--k-blue); font-size: 13.5px; font-weight: 500; }
 .wbg-dl { display: grid; grid-template-columns: 150px 1fr; gap: 3px 12px; margin: 0; font-size: 13.5px; }
 .wbg-dl dt { font-weight: 400; color: var(--wbg-muted); }
 .wbg-dl dd { margin: 0; overflow-wrap: anywhere; }
+/* the head of an Explore page: what it is on the left, its figures as tiles on the right */
+.wbg-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px 40px; align-items: start; background: #fff; border: 1px solid var(--wbg-line);
+  border-radius: var(--k-radius-lg); padding: 18px 22px; margin-bottom: 16px; box-shadow: var(--bs-box-shadow-sm, none); }
+.wbg-head .kd { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--wbg-muted); }
+.wbg-head h3 { font-size: 1.45rem; margin: 2px 0 8px; }
+.wbg-head .df { color: var(--wbg-ink2); font-size: 14px; }
+.wbg-head .nt { font-size: 12.5px; color: var(--wbg-muted); margin: 10px 0 0; max-width: 80ch; }
+.wbg-head .inst { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.wbg-head .tiles { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(104px, auto); gap: 10px; }
+.wbg-head .tiles > div { border: 1px solid var(--k-rule); background: var(--k-mist); border-radius: var(--k-radius-lg); padding: 10px 14px; min-width: 104px; }
+.wbg-head .tiles b { display: block; font-size: 1.6rem; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.wbg-head .tiles span { display: block; font-size: 12.5px; color: var(--wbg-ink2); line-height: 1.3; white-space: nowrap; }
+.wbg-head .tiles small { display: block; font-size: 11.5px; color: var(--wbg-muted); white-space: nowrap; }
+@media (max-width: 1100px) { .wbg-head { grid-template-columns: 1fr; } .wbg-head .tiles { grid-auto-flow: row; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); } }
+/* types as bars: name and one line of definition, a bar, the count */
+.wbg-tbars { display: flex; flex-direction: column; }
+.wbg-tbar { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(80px, 1fr) 72px; gap: 14px; align-items: center; width: 100%; text-align: left;
+  background: none; border: 0; border-bottom: 1px solid var(--k-rule); padding: 7px 6px; font: inherit; color: inherit; border-radius: 0; cursor: pointer; }
+.wbg-tbar:hover { background: var(--k-hover); }
+.wbg-tbar.head { cursor: default; padding: 0 6px 5px; font-size: 12px; font-weight: 600; color: var(--wbg-ink2); border-bottom: 1px solid var(--wbg-line); }
+.wbg-tbar.head:hover { background: none; }
+.wbg-tbar .tx { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; }
+.wbg-tbar .nm { font-weight: 600; font-size: 13.5px; color: var(--bs-primary, var(--k-blue)); }
+.wbg-tbar .sg { font-size: 11.5px; color: var(--wbg-muted); border: 1px solid var(--wbg-line); border-radius: 99px; padding: 0 6px; }
+.wbg-tbar .df { flex-basis: 100%; font-size: 12.5px; color: var(--wbg-ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wbg-tbar .tr { display: block; height: 16px; }
+.wbg-tbar .f { display: block; height: 100%; min-width: 2px; background: var(--k-bar); border-radius: var(--k-radius); }
+.wbg-tbar .v { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; font-size: 13.5px; }
+/* a project's facts in one band */
+.wbg-pfacts { display: grid; grid-template-columns: minmax(220px, 1.1fr) 3fr; gap: 12px 32px; align-items: start; }
+.wbg-pfacts .nm { font-weight: 600; font-size: 1.05rem; line-height: 1.3; }
+.wbg-pfacts .id { font-size: 12.5px; color: var(--wbg-muted); margin-top: 2px; }
+.wbg-pfacts { grid-template-columns: minmax(200px, 300px) 1fr; }
+.wbg-pfacts .facts { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px 28px; }
+.wbg-pfacts .facts .v { white-space: nowrap; }
+.wbg-pfacts .facts .k { display: block; font-size: 12px; color: var(--wbg-muted); }
+.wbg-pfacts .facts .v { display: block; font-size: 14px; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 1.3; }
+@media (max-width: 900px) { .wbg-pfacts { grid-template-columns: 1fr; } }
+.wbg-actgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); gap: 0 12px; align-items: start; }
+@media (max-width: 576px) { .wbg-actgrid { grid-template-columns: 1fr; } }
+/* procurement with nothing linked: one line, not an empty card */
+.card:has(.wbg-proc-empty) > .card-header { display: none; }
+.card:has(.wbg-proc-empty) > .card-body { padding-top: 12px; padding-bottom: 12px; gap: 0; }
+.card:has(.wbg-proc-empty) .shiny-html-output:empty { display: none; }
+.wbg-pair { align-items: start; }
+.wbg-stack { display: flex; flex-direction: column; gap: var(--bslib-spacer, 1rem); }
+.wbg-stack > .card { margin-bottom: 0; }
+.wbg-proc-empty { display: flex; gap: 12px; align-items: baseline; font-size: 14px; }
 /* lists of types, activities */
 .wbg-types .wbg-trow { display: grid; grid-template-columns: 1fr 96px 80px; gap: 14px; padding: 10px 6px; border-bottom: 1px solid var(--k-rule); cursor: pointer; align-items: baseline; }
 .wbg-types .wbg-trow:hover { background: var(--k-hover); }
@@ -744,6 +840,8 @@ a.nav-link[data-value="Start"], li:has(> a.nav-link[data-value="Start"]) { displ
 .dl-prev th { position: sticky; top: 0; background: #f4f5f7; text-align: left; padding: 5px 10px; border-bottom: 1px solid var(--wbg-line); font-weight: 600; }
 .dl-prev td { padding: 4px 10px; border-bottom: 1px solid var(--k-rule); max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
 .modal-xl-wbg .modal-dialog { max-width: 1040px; }
+/* between 992 and 1200 wide the bar keeps the family and drops the app's name, so nothing in it is cut */
+@media (min-width: 992px) and (max-width: 1199.98px) { .navbar .navbar-brand { font-size: 0; } .navbar .wbg-fam .sl { display: none; } .navbar .nav-link { padding-left: .45rem; padding-right: .45rem; } }
 @media (max-width: 576px) { .navbar-brand { flex-wrap: wrap; white-space: normal; gap: 0 10px; } .navbar .wbg-top { flex-wrap: wrap; padding: 8px 0; } .wbg-fgrid { grid-template-columns: 1fr; } .wbg-dl { grid-template-columns: 1fr; } .wbg-dl dt { margin-top: 6px; } .wbg-pkgline { grid-template-columns: 1fr; gap: 0; } }
 """
 
@@ -758,6 +856,17 @@ SCRIPT = """
     });
   }
   reg();
+  // the search icon in the bar opens the search box under it; a pick, Escape or a click elsewhere closes it
+  window.wbgFind = function (open) {
+    var f = document.getElementById('wbg_find'); if (!f) return;
+    var on = open === undefined ? !f.classList.contains('open') : open;
+    f.classList.toggle('open', on);
+    var s = document.getElementById('find'); s = s && s.selectize;
+    if (s) { if (on) { s.clear(true); setTimeout(function () { s.focus(); }, 30); } else { s.blur(); } }
+  };
+  document.addEventListener('click', function (e) { var f = document.getElementById('wbg_find'); if (f && f.classList.contains('open') && !f.contains(e.target)) wbgFind(false); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') wbgFind(false); });
+  if (window.jQuery) jQuery(document).on('change', '#find', function () { if (this.value) setTimeout(function () { wbgFind(false); }, 50); });
   // plotly charts measure their box once: tell them when the side panel has moved the page
   var t; document.addEventListener('transitionend', function () { clearTimeout(t); t = setTimeout(function () { window.dispatchEvent(new Event('resize')); }, 80); });
 })();

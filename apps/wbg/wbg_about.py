@@ -346,14 +346,15 @@ the Home page; a group's counts never include another's.</dd></div>
 <div><dt>Type</dt><dd>A subcategory of a measure, for example cell broadcast within early warning.{f' {types} types;' if types else ''}
 a sentence may hold more than one.</dd></div>
 <div><dt>Digital asset</dt><dd>One of {assets} defined categories of digital infrastructure or system a project finances, from
-fibre networks to data infrastructure. A commitment whose sentence names none is shown as "No asset named".</dd></div>
+fibre networks to data infrastructure. A commitment whose sentences name none is shown as "No single asset". Policy is not an asset: whether a commitment is investment or policy is a separate reading.</dd></div>
 <div><dt>Package</dt><dd>One line of a project's procurement plan, with its method, estimate, dates and status.</dd></div>
 <div><dt>Probability</dt><dd>For a sentence and a definition, the probability the decision model gives to grades 2 and 3
 together: P(grade 2) + P(grade 3). The strength marker beside a sentence shows how far above the threshold it is.</dd></div>
-<div><dt>Stage</dt><dd>Where a commitment's linked procurement stands. Coming up: a package is planned, out to tender, or
-past its planned date (overdue). Under way: a contract is signed or being carried out. Completed: a contract is complete.
-Package dropped: a linked package was cancelled or left the plan; the commitment itself may stand. No package linked: none
-was matched.</dd></div>
+<div><dt>Package status</dt><dd>Where a linked package stands, by the names the procurement plan itself uses. Planned: in the
+plan, not yet out. Tendered: out to tender. Contract signed. Under implementation: the contract is being carried out. Contract
+completed. Cancelled. Not in latest plan: the package has left the plan; the commitment itself may stand. A Planned package
+whose planned date has passed with no notice or signing recorded is still Planned; it is drawn hollow and marked "date
+passed". A past date is what the plan records, not evidence of delay.</dd></div>
 <div><dt>Regional project</dt><dd>A project covering several countries. It is counted under its region and is not in
 country counts or on the map.</dd></div>
 </dl></section>
