@@ -15,7 +15,7 @@ CSS = """
 .kit-heat { border-collapse: separate; border-spacing: 3px; table-layout: fixed; font-size: 13px; }
 .kit-heat th, .kit-heat td { padding: 0; font-weight: 400; vertical-align: middle; }
 .kit-heat thead th { vertical-align: bottom; text-align: center; font-size: 11.5px; line-height: 1.25; color: #4b5563; padding: 0 2px 4px; }
-.kit-heat thead th .n, .kit-heat tbody th .n { display: block; overflow-wrap: anywhere; }
+.kit-heat thead th .n, .kit-heat tbody th .n { display: block; overflow-wrap: break-word; }
 .kit-heat tbody th { text-align: right; font-size: 12.5px; line-height: 1.25; color: var(--bs-body-color, #1b1f24); padding-right: 8px; }
 .kit-heat .lnk { cursor: pointer; background: none; border: 0; padding: 0; font: inherit; color: inherit; text-align: inherit; width: 100%; }
 .kit-heat .lnk:hover { color: var(--bs-primary, #2458b3); text-decoration: underline; }
