@@ -521,12 +521,16 @@ def heat(df, row, col, *, rows, cols, row_label=lambda v: v, col_label=lambda v:
         row_nav=row_nav, col_nav=nav if any(nav) else None, cell_w=cell_w, label_w=label_w, tot_label=tot_label), note)
 
 
-def bars(df, col, *, where=None, label=lambda v: v, title=None, order=None, zeros=False, colors=None, of=None, label_w=220):
+def bars(df, col, *, where=None, label=lambda v: v, title=None, order=None, zeros=False, colors=None, of=None, label_w=220, top=None):
     """Bars of activities (or projects) per value of col, drawn as rows like the lists: a label, a bar, its value. A
-    click opens the bar in the side panel like everything else."""
+    click opens the bar in the side panel like everything else. top: only the first so many, with a line for the rest."""
     if df.empty:
         return cui.p("Nothing under these filters.", class_="wbg-muted")
     c = tally(expand(df, col), col, of=of)
+    more = None
+    if top and len(c) > top:
+        more = cui.p(f"and {len(c) - top:,} more on the map", class_="kb-note mb-0")
+        c = c.sort_values("n", ascending=False, kind="stable").head(top)
     if order:
         c = c.set_index(col).reindex(order if zeros else [o for o in order if o in set(c[col])]).reset_index()
         c["n"] = c["n"].fillna(0)
@@ -536,7 +540,7 @@ def bars(df, col, *, where=None, label=lambda v: v, title=None, order=None, zero
         rows.append({"label": name, "value": r["n"], "text": cell_text(r) if r["n"] else "0",
                      "tip": f"{name}\n{of_text(r) if r['n'] else '0 ' + unit_word()}",
                      "payload": {"title": (title or label)(k), "where": {**(where or {}), col: k}}, "color": (colors or {}).get(k)})
-    return kit.bar_rows(rows, label_w=label_w)
+    return cui.TagList(kit.bar_rows(rows, label_w=label_w), more)
 
 
 def lens_map(df, where, *, height=420, go=False):
@@ -549,6 +553,14 @@ def lens_map(df, where, *, height=420, go=False):
     names = list(fig.data[0].text) if len(fig.data) else []
     fig.data[0].customdata = [{"go": "country", "value": n} if go else {"title": n, "where": {**where, "place": n}} for n in names]
     return fig
+
+
+def places(df, where, top=6):
+    """The countries with most, as bars beside a map: a click opens them in the panel; regional projects are left out."""
+    d = df[~df["is_regional"].fillna(False).astype(bool)]
+    if d.empty:
+        return cui.p("Only regional projects: nothing on the map.", class_="wbg-muted mb-0")
+    return bars(d, "place", where=where, title=lambda v: f"In {v}", label_w=150, top=top)
 
 
 def facts(name, kind, df, definition=None, note=None, *, of=None, of_what="projects read", extra=None):
@@ -995,7 +1007,23 @@ with ui.nav_panel("Explore"):
                                                     df["project_name"].iloc[0]), cui.span(f" · {pid}", class_="lead-in"), class_="df"),
                             class_="tx"),
                     project_facts(pf.iloc[0] if len(pf) else None, df, bare=True), class_="wbg-head one")
-            return facts(input.pick(), PLACE, df, of=lens_base(), of_what="projects read here")
+            pf = proj_facts()
+            pf = pf[pf["project_id"].isin(df["project_id"])]
+            bits = []
+            amt = pf["commitment_usd_millions"].dropna()
+            if len(amt):
+                bits.append(f"{L.money(amt.sum() * 1e6)} in all")
+            fy = pf["approval_fiscal_year"].dropna().astype(int)
+            if len(fy):
+                bits.append(f"approved FY{fy.min()}" + (f" to FY{fy.max()}" if fy.max() != fy.min() else ""))
+            cl = pd.to_datetime(pf["closing_date"]).dropna()
+            if len(cl):
+                bits.append(f"closing {cl.min().year}" + (f" to {cl.max().year}" if cl.max().year != cl.min().year else ""))
+            pr = sorted({p for p in pf["practice"].dropna() if p})
+            if pr:
+                bits.append("; ".join(pr))
+            line = cui.div(f"{L.plural(len(pf), 'project')}: " + " · ".join(bits), class_="df") if bits else None
+            return facts(input.pick(), PLACE, df, of=lens_base(), of_what="projects read here", extra=line)
 
         @render.ui
         def c_body():
@@ -1239,14 +1267,6 @@ with ui.nav_panel("Explore"):
                     return type_bars(items, head="Asset type")
 
             with ui.card():
-                ui.card_header("Where")
-
-                @render_plotly
-                def a_map():
-                    return lens_map(lens_frame(), {"asset": input.pick()}, height=300)
-
-        with ui.layout_columns(col_widths={"sm": (12, 12), "xl": (5, 7)}):
-            with ui.card():
                 ui.card_header("Measures committed for it")
 
                 @render.ui
@@ -1255,6 +1275,7 @@ with ui.nav_panel("Explore"):
                     return bars(lens_frame(), "label_set", where={"asset": input.pick()}, label=lambda m: names.get(m, m),
                                 of=lens_base(), label_w=210)
 
+        with ui.layout_columns(col_widths={"sm": (12, 12), "xl": (7, 5)}, class_="wbg-pair"):
             with ui.card():
                 ui.card_header("Measures by region")
 
@@ -1265,7 +1286,18 @@ with ui.nav_panel("Explore"):
                     rg = df.groupby("region").size().sort_values(ascending=False).index.tolist()
                     ms = df.groupby("label_set").size().sort_values(ascending=False).index.tolist()
                     return heat(df, "label_set", "region", rows=ms, cols=rg, row_label=lambda m: names.get(m, m), col_label=L.short_region,
-                                col_hover=rg, where={"asset": input.pick()}, label_w=230, of=lens_base())
+                                col_hover=rg, where={"asset": input.pick()}, label_w=210, of=lens_base())
+
+            with ui.card():
+                ui.card_header("Where")
+
+                @render_plotly
+                def a_map():
+                    return lens_map(lens_frame(), {"asset": input.pick()}, height=280)
+
+                @render.ui
+                def a_places():
+                    return places(lens_frame(), {"asset": input.pick()})
 
         with ui.card():
             ui.card_header("Procurement for this asset")
@@ -1288,7 +1320,7 @@ with ui.nav_panel("Explore"):
             return facts(measure_names().get(input.pick(), input.pick()), "Measure", df,
                          m["definition"].iloc[0] if len(m) else None, acc)
 
-        with ui.layout_columns(col_widths={"sm": (12, 12), "lg": (6, 6)}):
+        with ui.layout_columns(col_widths={"sm": (12, 12), "lg": (6, 6)}, class_="wbg-pair"):
             with ui.card():
                 ui.card_header("Its types")
 
@@ -1314,31 +1346,6 @@ with ui.nav_panel("Explore"):
                     return type_bars(items)
 
             with ui.card():
-                ui.card_header("Where")
-
-                @render_plotly
-                def m_map():
-                    return lens_map(lens_frame(), mwhere(input.pick()), height=380)
-
-        with ui.card():
-            ui.card_header("Where it stands, by linked procurement")
-            proc_section("m", lambda: pkgs_for(lens_frame()), title="Linked procurement")
-
-        if True:
-            with ui.card():
-                ui.card_header("Types by asset and instrument")
-
-                @render.ui
-                def m_heat_asset():
-                    df, m = lens_frame(), input.pick()
-                    tn = type_names(m)
-                    have = {a for l in df["assets"] for a in l}
-                    cols = [a for a in axis() if a in have]
-                    ts = sorted(expand(df, "type")["type"].dropna().unique(), key=lambda t: (t == W.NO_TYPE, str(tn.get(t, t))))
-                    return heat(df, "type", "asset", rows=ts, cols=cols, row_label=lambda t: L.short_type(tn.get(t, t)),
-                                col_label=L.short_asset, col_hover=cols, where=mwhere(m), label_w=230, of=lens_base(), instrument=True)
-
-            with ui.card():
                 ui.card_header("Types by region")
 
                 @render.ui
@@ -1349,7 +1356,39 @@ with ui.nav_panel("Explore"):
                     ts = [t for t in expand(df, "type")["type"].dropna().unique()]
                     ts = sorted(ts, key=lambda t: (t == W.NO_TYPE, str(tn.get(t, t))))
                     return heat(df, "type", "region", rows=ts, cols=rg, row_label=lambda t: L.short_type(tn.get(t, t)),
-                                col_label=L.short_region, col_hover=rg, where=mwhere(m), label_w=230, of=lens_base())
+                                col_label=L.short_region, col_hover=rg, where=mwhere(m), label_w=150, cell_w=46, of=lens_base())
+
+        with ui.card():
+            ui.card_header("Types by asset and instrument")
+
+            @render.ui
+            def m_heat_asset():
+                df, m = lens_frame(), input.pick()
+                tn = type_names(m)
+                have = {a for l in df["assets"] for a in l}
+                cols = [a for a in axis() if a in have]
+                ts = sorted(expand(df, "type")["type"].dropna().unique(), key=lambda t: (t == W.NO_TYPE, str(tn.get(t, t))))
+                return heat(df, "type", "asset", rows=ts, cols=cols, row_label=lambda t: L.short_type(tn.get(t, t)),
+                            col_label=L.short_asset, col_hover=cols, where=mwhere(m), label_w=230, of=lens_base(), instrument=True)
+
+        with ui.layout_columns(col_widths={"sm": (12, 12), "lg": (7, 5)}, class_="wbg-pair"):
+            with ui.card():
+                ui.card_header("Where")
+
+                @render_plotly
+                def m_map():
+                    return lens_map(lens_frame(), mwhere(input.pick()), height=320)
+
+            with ui.card():
+                ui.card_header("Countries with most")
+
+                @render.ui
+                def m_places():
+                    return places(lens_frame(), mwhere(input.pick()), top=9)
+
+        with ui.card():
+            ui.card_header("Where it stands, by linked procurement")
+            proc_section("m", lambda: pkgs_for(lens_frame()), title="Linked procurement")
 
 
 # ======================================================= procurement

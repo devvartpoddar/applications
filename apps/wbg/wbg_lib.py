@@ -414,7 +414,7 @@ def proc_calendar(pk, key, sel_q, today, tab=None):
     chart = cui.div(
         cui.div(*cols, cui.div(cui.span("today"), class_="pc-today" + (" r" if left > 90 else ""), style=f"left:{left:.2f}%"),
                 class_="pc-cols", style=f"height:{height}px"),
-        cui.div(*axis, class_="pc-axis"), class_="pc-chart", style=f"min-width:{nq * (per_row * 11 + 6)}px")
+        cui.div(*axis, class_="pc-axis"), class_="pc-chart", style=f"min-width:{nq * per_row * 11}px")
     note = cui.p(cui.span("One square per package, by quarter. Click a quarter to list it.",
                           **{"data-tip": "One square per package\nIn the quarter of its planned date, its signing date once signed, "
                                          "or the date it was due."}),
@@ -470,7 +470,7 @@ def proc_list(pk, key, tab, sort, desc, limit, sel_q, asset_names, *, tabs=True,
     for _, r in view.iterrows():
         cells = {"date": cui.tags.td(day(r["date"]) or "no date", cui.div(LATE_NOTE, class_="late") if r["late"] else None, class_="w-date"),
                  "pkg": cui.tags.td(r["package_number"] or r["package_id"], class_="w-pkg"),
-                 "desc": cui.tags.td(cui.div(r["description"] or "", class_="clamp"), status_dot(r["tab"], r["late"])
+                 "desc": cui.tags.td(cui.div(r["description"] or "", class_="clamp"), status_dot(r["tab"])
                                      if tab == "All" else None),
                  "project": cui.tags.td(cui.div(r["project_name"], class_="clamp"), class_="w-proj"),
                  "country": cui.tags.td(r["place"], class_="w-ctry"),
@@ -697,9 +697,11 @@ a.nav-link[data-value="Start"], li:has(> a.nav-link[data-value="Start"]) { displ
 .pc-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: var(--k-fs-b); margin-bottom: 8px; align-items: center; }
 .pc-legend .lg { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .pc-legend .lg .c { color: var(--wbg-muted); font-variant-numeric: tabular-nums; }
-.pc-legend .lg.note { padding-left: 14px; border-left: 1px solid var(--wbg-line); color: var(--k-muted); }
+.pc-legend .lg { font-size: var(--k-fs-s); }
+.pc-legend .lg.note { color: var(--k-muted); padding-left: 4px; }
 .pc-legend.tabs { gap: 6px; margin-bottom: 10px; }
-.pc-legend.tabs .lg.note { margin-left: 8px; }
+.pc-legend.tabs .pc-tab { padding: 2px 10px; gap: 6px; font-size: var(--k-fs-s); }
+.pc-legend.tabs .lg.note { gap: 5px; }
 .pc-scroll { overflow-x: auto; padding-bottom: 2px; }
 .pc-chart { width: 100%; }
 .pc-cols { position: relative; display: flex; align-items: stretch; border-bottom: 1px solid var(--wbg-line); }
@@ -721,9 +723,9 @@ a.nav-link[data-value="Start"], li:has(> a.nav-link[data-value="Start"]) { displ
 .pc-tab.on { background: var(--k-ink); border-color: var(--k-ink); color: #fff; }
 .pc-tab.on .c { color: #c9d0da; }
 .pc-qchip { border: 1px solid var(--k-blue); background: var(--k-selected); color: #1a4287; border-radius: 99px; padding: 3px 12px; font-size: var(--k-fs-b); cursor: pointer; }
-.pc-table { table-layout: fixed; min-width: 1240px; }
-.pc-table .w-date { width: 104px; } .pc-table .w-pkg { width: 100px; } .pc-table .w-proj { width: 190px; } .pc-table .w-ctry { width: 110px; }
-.pc-table .w-cat { width: 96px; } .pc-table .w-meth { width: 120px; } .pc-table .w-amt { width: 124px; } .pc-table .w-for { width: 180px; }
+.pc-table { table-layout: fixed; min-width: 1100px; }
+.pc-table .w-date { width: 104px; } .pc-table .w-pkg { width: 96px; } .pc-table .w-proj { width: 170px; } .pc-table .w-ctry { width: 100px; }
+.pc-table .w-cat { width: 92px; } .pc-table .w-meth { width: 112px; } .pc-table .w-amt { width: 124px; } .pc-table .w-for { width: 160px; }
 .pc-table td.w-pkg { overflow-wrap: anywhere; }
 .pc-table .srt { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; }
 .pc-table .srt:hover, .pc-table .srt.on { color: var(--bs-primary, var(--k-blue)); }
@@ -795,7 +797,7 @@ a.nav-link[data-value="Start"], li:has(> a.nav-link[data-value="Start"]) { displ
 .wbg-head .facts, .wbg-pfacts .facts { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px 28px; }
 .wbg-head .facts .k, .wbg-pfacts .facts .k { display: block; font-size: var(--k-fs-s); color: var(--k-muted); }
 .wbg-head .facts .v, .wbg-pfacts .facts .v { display: block; font-size: var(--k-fs-b); font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
-@media (max-width: 1100px) { .wbg-head.one { grid-template-columns: 1fr; } }
+@media (max-width: 1360px) { .wbg-head.one { grid-template-columns: 1fr; gap: 12px; } }
 /* a quiet filter as text links */
 .wbg-tlinks { display: inline-flex; align-items: baseline; gap: 6px; font-size: var(--k-fs-s); }
 .wbg-tlinks button { border: 0; background: none; padding: 0; color: var(--k-blue); font: inherit; cursor: pointer; }
